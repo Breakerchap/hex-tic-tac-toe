@@ -26,6 +26,39 @@
         </div>
       </section>
 
+      <section class="section">
+        <div class="small" style="margin-bottom: 8px; color: var(--text);">Timer</div>
+        <div class="grid2">
+          <input id="timerMinutesInput" type="number" min="1" max="180" step="1" value="5" aria-label="Initial minutes" />
+          <input id="timerIncrementInput" type="number" min="0" max="120" step="1" value="2" aria-label="Increment seconds" />
+        </div>
+        <div class="small" style="margin-top: 8px;">Initial minutes | increment seconds per completed turn</div>
+        <div style="height: 8px"></div>
+        <label class="small" style="display: flex; align-items: center; gap: 8px; color: var(--text);">
+          <input id="timerEnabledInput" type="checkbox" checked />
+          Enable game timer
+        </label>
+        <div style="height: 10px"></div>
+        <div class="controls">
+          <button id="applyTimerBtn">Apply Timer</button>
+          <div class="small" id="timerSummaryText" style="align-self: center;">5m +2s</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="small" style="margin-bottom: 8px; color: var(--text);">Online</div>
+        <div class="controls">
+          <button id="onlineCreateBtn" class="primary">Create Room</button>
+          <button id="onlineJoinBtn">Join Room</button>
+          <input id="onlineRoomInput" placeholder="Room code" aria-label="Room code" />
+          <button id="onlineLeaveBtn">Leave Room</button>
+        </div>
+        <div style="height: 8px"></div>
+        <div class="small" id="onlineStatusText">Online: offline</div>
+        <div class="small" id="onlineRoomText">Room: -</div>
+        <div class="small" id="onlineRoleText">Role: local</div>
+      </section>
+
       <section class="statusCard">
         <div class="small">Current turn</div>
         <div id="turnBig" class="turnBig playerP1">Player 1</div>
@@ -37,6 +70,11 @@
           <strong>Moves left</strong><span id="movesLeftText">1</span>
           <strong>Bird phase</strong><span id="duckPhaseText">No</span>
           <strong>Winner</strong><span id="winnerText">None</span>
+        </div>
+        <div style="height: 12px"></div>
+        <div class="kv">
+          <strong>Player 1 clock</strong><span id="p1ClockText">05:00</span>
+          <strong>Player 2 clock</strong><span id="p2ClockText">05:00</span>
         </div>
         <div style="height: 12px"></div>
         <div class="pillRow" id="modePills"></div>
@@ -86,6 +124,9 @@
     </main>
   </div>
 
+  <script src="./hex_tictactoe_perf_helpers.js"></script>
+  <script src="./hex_tictactoe_timer_helpers.js"></script>
+  <script src="./hex_tictactoe_half_and_half_helpers.js"></script>
   <script src="./hex_tictactoe_absurd_modes.js"></script>
 </body>
 </html>

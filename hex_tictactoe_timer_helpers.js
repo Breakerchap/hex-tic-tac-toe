@@ -1,0 +1,98 @@
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) {
+    module.exports = api;
+  }
+  root.HexTicTacToeTimer = api;
+}(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  function toFiniteNumber(value, fallback) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  }
+
+  function normaliseTimerConfig(config) {
+    const safe = config || {};
+    const enabled = Boolean(safe.enabled);
+    const initialMinutes = Math.max(1, Math.min(180, Math.round(toFiniteNumber(safe.initialMinutes, 5))));
+    const incrementSeconds = Math.max(0, Math.min(120, Math.round(toFiniteNumber(safe.incrementSeconds, 2))));
+    return {
+      enabled,
+      initialMinutes,
+      incrementSeconds
+    };
+  }
+
+  function createClockState(config) {
+    const timer = normaliseTimerConfig(config);
+    const initialSeconds = timer.initialMinutes * 60;
+    return {
+      enabled: timer.enabled,
+      initialSeconds,
+      incrementSeconds: timer.incrementSeconds,
+      remaining: {
+        1: initialSeconds,
+        2: initialSeconds
+      },
+      activePlayer: 1,
+      flaggedPlayer: 0
+    };
+  }
+
+  function formatClock(seconds) {
+    const clamped = Math.max(0, toFiniteNumber(seconds, 0));
+    const total = Math.floor(clamped);
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+
+  function applyElapsed(clock, elapsedSeconds) {
+    if (!clock || !clock.enabled || clock.flaggedPlayer) {
+      return { expiredPlayer: 0 };
+    }
+
+    const elapsed = Math.max(0, toFiniteNumber(elapsedSeconds, 0));
+    if (elapsed <= 0) {
+      return { expiredPlayer: 0 };
+    }
+
+    const activePlayer = clock.activePlayer === 2 ? 2 : 1;
+    const nextRemaining = Math.max(0, clock.remaining[activePlayer] - elapsed);
+    clock.remaining[activePlayer] = nextRemaining;
+
+    if (nextRemaining === 0) {
+      clock.flaggedPlayer = activePlayer;
+      return { expiredPlayer: activePlayer };
+    }
+
+    return { expiredPlayer: 0 };
+  }
+
+  function switchTurnWithIncrement(clock, nextPlayer) {
+    if (!clock) {
+      return;
+    }
+
+    const current = clock.activePlayer === 2 ? 2 : 1;
+    if (clock.enabled && !clock.flaggedPlayer) {
+      clock.remaining[current] += Math.max(0, toFiniteNumber(clock.incrementSeconds, 0));
+    }
+    clock.activePlayer = nextPlayer === 2 ? 2 : 1;
+  }
+
+  function setTimerEnabled(clock, enabled) {
+    if (!clock) {
+      return;
+    }
+    clock.enabled = Boolean(enabled);
+  }
+
+  return {
+    normaliseTimerConfig,
+    createClockState,
+    formatClock,
+    applyElapsed,
+    switchTurnWithIncrement,
+    setTimerEnabled
+  };
+}));
