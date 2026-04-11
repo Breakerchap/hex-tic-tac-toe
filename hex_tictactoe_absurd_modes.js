@@ -5,6 +5,7 @@ const timerHelpers = window.HexTicTacToeTimer || {};
 const halfHelpers = window.HexTicTacToeHalf || {};
 
 const ui = {
+  appRoot: document.getElementById("appRoot"),
   modePicker: document.getElementById("modePicker"),
   newGameBtn: document.getElementById("newGameBtn"),
   undoBtn: document.getElementById("undoBtn"),
@@ -36,7 +37,8 @@ const ui = {
   onlineRoomInput: document.getElementById("onlineRoomInput"),
   onlineStatusText: document.getElementById("onlineStatusText"),
   onlineRoomText: document.getElementById("onlineRoomText"),
-  onlineRoleText: document.getElementById("onlineRoleText")
+  onlineRoleText: document.getElementById("onlineRoleText"),
+  toggleMenuBtn: document.getElementById("toggleMenuBtn")
 };
 
 const SQRT3 = Math.sqrt(3);
@@ -221,8 +223,8 @@ const MODES = {
   },
   echo: {
     name: "Echo",
-    summary: "Each placement and bird move schedules an echo two full turns later at the mirrored coordinate across the origin, if that hex is open.",
-    hint: "Echo targets are shown as faint outlines, including bird echoes.",
+    summary: "Each stone placement schedules an echo two full turns later at the mirrored coordinate across the origin, if that hex is open. Ducks also project a mirrored copy immediately.",
+    hint: "Stone echoes are shown as faint outlines. Bird copies mirror instantly and vanish when that bird moves again.",
     tags: ["Delayed copy", "Mirror"]
   },
   kingDuck: {
@@ -236,12 +238,6 @@ const MODES = {
     summary: "Every 3 full turns, all occupied hexes tied for farthest distance from the origin are deleted.",
     hint: "The outer edge gets cleared every 3 rounds.",
     tags: ["Meteor", "Cleanup"]
-  },
-  halfAndHalf: {
-    name: "Half & Half",
-    summary: "Capture on occupied enemy tiles advances ownership by 25% each time. A hex counts for a player only once they control at least 50%.",
-    hint: "Captures shift control by +25%. Reach >=50% to count in lines.",
-    tags: ["Capture", "Shared line"]
   }
 };
 
@@ -393,6 +389,9 @@ const game = {
   hoverHex: { q: 0, r: 0 },
   isPanning: false,
   panLast: { x: 0, y: 0 },
+  touchPanMoved: false,
+  touchPinchState: null,
+  ignoreClickUntil: 0,
   previewModeKeys: [],
   modeUiSignature: "",
   renderScheduled: false,
@@ -452,6 +451,9 @@ function getModeConfig(modeKeys) {
 }
 
 function hasMode(state, modeKey) {
+  if (modeKey === "halfAndHalf") {
+    return false;
+  }
   return state.modeKeys.includes(modeKey);
 }
 
@@ -506,6 +508,10 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
       duck: null,
       kingDuck: null
     },
+    birdEchoCopies: {
+      duck: null,
+      kingDuck: null
+    },
     duckPhase: false,
     birdMovesPending: [],
     currentBirdMoveKind: null,
@@ -535,6 +541,17 @@ function setModeUI(modeKeys) {
     pill.textContent = tag;
     ui.modePills.appendChild(pill);
   });
+}
+
+function setOptionsMenuCollapsed(collapsed) {
+  ui.appRoot.classList.toggle("menuCollapsed", collapsed);
+  ui.toggleMenuBtn.textContent = collapsed ? "Show menu" : "Hide menu";
+  ui.toggleMenuBtn.setAttribute("aria-label", collapsed ? "Show options menu" : "Hide options menu");
+  ui.toggleMenuBtn.setAttribute("aria-pressed", collapsed ? "true" : "false");
+  // Grid transitions animate for ~200ms; resize now and again after layout settles.
+  resizeCanvas();
+  window.requestAnimationFrame(() => resizeCanvas());
+  window.setTimeout(() => resizeCanvas(), 240);
 }
 
 function pushLog(text) {
@@ -962,6 +979,15 @@ function getBirdEntries(state) {
     .map((birdKind) => ({ birdKind, hex: state.birds[birdKind] }));
 }
 
+function ensureBirdEchoCopyState(state) {
+  if (!state.birdEchoCopies) {
+    state.birdEchoCopies = {
+      duck: null,
+      kingDuck: null
+    };
+  }
+}
+
 function getBirdAt(state, hex) {
   for (const birdKind of BIRD_KINDS) {
     const birdHex = state.birds[birdKind];
@@ -970,6 +996,26 @@ function getBirdAt(state, hex) {
     }
   }
   return null;
+}
+
+function getBirdEchoCopyAt(state, hex) {
+  if (!hasMode(state, "echo")) return null;
+  ensureBirdEchoCopyState(state);
+  for (const birdKind of BIRD_KINDS) {
+    const copyHex = state.birdEchoCopies[birdKind];
+    if (copyHex && equalHex(copyHex, hex)) {
+      return birdKind;
+    }
+  }
+  return null;
+}
+
+function getBirdEchoCopyEntries(state) {
+  if (!hasMode(state, "echo")) return [];
+  ensureBirdEchoCopyState(state);
+  return BIRD_KINDS
+    .filter((birdKind) => state.birdEchoCopies[birdKind])
+    .map((birdKind) => ({ birdKind, hex: state.birdEchoCopies[birdKind] }));
 }
 
 function getCellAt(state, hex) {
@@ -981,31 +1027,44 @@ function isStoneOccupied(state, hex) {
 }
 
 function isHexOpen(state, hex) {
-  return !isStoneOccupied(state, hex) && !getBirdAt(state, hex);
+  return !isStoneOccupied(state, hex) && !getBirdAt(state, hex) && !getBirdEchoCopyAt(state, hex);
 }
 
 function isHexOpenForBird(state, hex, birdKind) {
+  if (isStoneOccupied(state, hex)) return false;
   const birdAt = getBirdAt(state, hex);
-  return !isStoneOccupied(state, hex) && (!birdAt || birdAt === birdKind);
+  if (birdAt && birdAt !== birdKind) return false;
+  const copyAt = getBirdEchoCopyAt(state, hex);
+  if (copyAt && copyAt !== birdKind) return false;
+  return true;
 }
 
 function getPlacementAnchorHexes(state) {
   return [
     ...Object.keys(state.cells).map((key) => parseKey(key)),
-    ...getBirdEntries(state).map((entry) => ({ ...entry.hex }))
+    ...getBirdEntries(state).map((entry) => ({ ...entry.hex })),
+    ...getBirdEchoCopyEntries(state).map((entry) => ({ ...entry.hex }))
   ];
 }
 
 function rebuildPanicZones(state) {
+  ensureBirdEchoCopyState(state);
   state.panicZones = {};
+  const panicSources = [];
   const kingDuckHex = getBirdHex(state, "kingDuck");
-  if (!kingDuckHex) {
-    return;
+  if (kingDuckHex) {
+    panicSources.push(kingDuckHex);
+  }
+  const kingDuckEchoCopy = state.birdEchoCopies?.kingDuck;
+  if (hasMode(state, "echo") && kingDuckEchoCopy) {
+    panicSources.push(kingDuckEchoCopy);
   }
 
-  for (const n of neighbours(kingDuckHex)) {
-    if (!isOccupied(state, n)) {
-      state.panicZones[keyOf(n.q, n.r)] = true;
+  for (const source of panicSources) {
+    for (const n of neighbours(source)) {
+      if (!isOccupied(state, n)) {
+        state.panicZones[keyOf(n.q, n.r)] = true;
+      }
     }
   }
 }
@@ -1017,11 +1076,14 @@ function isHexBlockedBySpecials(state, hex) {
   if (state.panicZones[keyOf(hex.q, hex.r)]) {
     return true;
   }
+  if (getBirdEchoCopyAt(state, hex)) {
+    return true;
+  }
   return false;
 }
 
 function isOccupied(state, hex) {
-  return isStoneOccupied(state, hex) || Boolean(getBirdAt(state, hex));
+  return isStoneOccupied(state, hex) || Boolean(getBirdAt(state, hex)) || Boolean(getBirdEchoCopyAt(state, hex));
 }
 
 function isWithinPlacementRange(state, hex) {
@@ -1091,6 +1153,38 @@ function moveBird(state, hex, birdMoveKind = "duck") {
   rebuildPanicZones(state);
 }
 
+function syncBirdEchoCopy(state, birdKind) {
+  ensureBirdEchoCopyState(state);
+  state.birdEchoCopies[birdKind] = null;
+  if (!hasMode(state, "echo")) {
+    rebuildPanicZones(state);
+    return;
+  }
+
+  const birdHex = getBirdHex(state, birdKind);
+  if (!birdHex) {
+    rebuildPanicZones(state);
+    return;
+  }
+
+  const target = { q: -birdHex.q, r: -birdHex.r };
+  if (isStoneOccupied(state, target)) {
+    rebuildPanicZones(state);
+    return;
+  }
+  if (getBirdAt(state, target)) {
+    rebuildPanicZones(state);
+    return;
+  }
+  if (getBirdEchoCopyAt(state, target)) {
+    rebuildPanicZones(state);
+    return;
+  }
+
+  state.birdEchoCopies[birdKind] = target;
+  rebuildPanicZones(state);
+}
+
 function countsForOwnerAt(state, pos, owner) {
   const cell = getCellAt(state, pos);
   return cellCountsForOwner(cell, owner);
@@ -1154,6 +1248,9 @@ function queueEcho(state, echo) {
   if (!hasMode(state, "echo")) {
     return;
   }
+  if (echo.kind === "bird") {
+    return;
+  }
   state.pendingEchoes.push({
     targetTurn: state.turnCount + 2,
     ...echo,
@@ -1173,12 +1270,8 @@ function resolveEchoes(state) {
     }
     const target = { q: -echo.source.q, r: -echo.source.r };
     if (echo.kind === "bird") {
-      if (!isHexOpenForBird(state, target, echo.birdKind)) {
-        pushLog(`Echoed ${getBirdMoveLabel(echo.birdKind)} could not appear at (${target.q}, ${target.r}).`);
-        continue;
-      }
-      moveBird(state, target, echo.birdKind);
-      pushLog(`Echo moved ${getBirdMoveTitle(echo.birdKind)} to (${target.q}, ${target.r}).`);
+      // Legacy save compatibility: bird echoes are now immediate mirrored copies, not delayed moves.
+      syncBirdEchoCopy(state, echo.birdKind);
       continue;
     }
     if (!isHexOpen(state, target)) {
@@ -1193,7 +1286,7 @@ function resolveEchoes(state) {
 
 function getOrbitDestination(state, fromHex) {
   const rotated = orbitStep(fromHex);
-  return getBirdAt(state, rotated) ? { ...fromHex } : rotated;
+  return (getBirdAt(state, rotated) || getBirdEchoCopyAt(state, rotated)) ? { ...fromHex } : rotated;
 }
 
 function resolveOrbit(state) {
@@ -1247,6 +1340,7 @@ function getMeteorTargets(state) {
 }
 
 function resolveMeteorAccounting(state) {
+  ensureBirdEchoCopyState(state);
   if (!hasMode(state, "meteorAccounting")) {
     return;
   }
@@ -1264,6 +1358,7 @@ function resolveMeteorAccounting(state) {
   for (const entry of farthest) {
     if (entry.type === "bird") {
       state.birds[entry.birdKind] = null;
+      state.birdEchoCopies[entry.birdKind] = null;
     } else {
       removeStone(state, entry.pos);
     }
@@ -1417,11 +1512,7 @@ function clickPlacement(hex) {
     }
     saveHistory();
     moveBird(state, hex, birdMoveKind);
-    queueEcho(state, {
-      kind: "bird",
-      birdKind: birdMoveKind,
-      source: hex
-    });
+    syncBirdEchoCopy(state, birdMoveKind);
     pushLog(`${getBirdMoveTitle(birdMoveKind)} moved to (${hex.q}, ${hex.r}).`);
     if (state.birdMovesPending.length > 0) {
       state.currentBirdMoveKind = state.birdMovesPending.shift();
@@ -1737,6 +1828,23 @@ function drawOrbitPreview() {
   }
 }
 
+function drawBirdEchoCopy(birdKind, copyHex, size) {
+  const world = axialToPixel(copyHex, size);
+  const screen = worldToScreen(world.x, world.y);
+  const isKingDuck = birdKind === "kingDuck";
+  const fill = isKingDuck ? "#ffcf63" : "#ffd75e";
+  const stroke = isKingDuck ? "rgba(255, 179, 92, 0.95)" : "rgba(255,255,255,0.55)";
+  ctx.save();
+  ctx.globalAlpha = 0.36;
+  drawHex(screen.x, screen.y, size * 0.78, fill, stroke, isKingDuck ? 2 : 1.6);
+  ctx.fillStyle = "rgba(40, 25, 0, 0.85)";
+  ctx.font = `${Math.max(12, size * 0.78)}px system-ui`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("\u{1F986}", screen.x, screen.y + 1);
+  ctx.restore();
+}
+
 function drawBirdPiece(birdKind, birdHex, size) {
   const world = axialToPixel(birdHex, size);
   const screen = worldToScreen(world.x, world.y);
@@ -1847,6 +1955,15 @@ function drawPieces() {
       continue;
     }
     drawBirdPiece(birdKind, hex, size);
+  }
+
+  for (const { birdKind, hex } of getBirdEchoCopyEntries(game.state)) {
+    const world = axialToPixel(hex, size);
+    const screen = worldToScreen(world.x, world.y);
+    if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+      continue;
+    }
+    drawBirdEchoCopy(birdKind, hex, size);
   }
 }
 
@@ -2049,6 +2166,9 @@ canvas.addEventListener("click", (event) => {
   if (event.button !== 0) {
     return;
   }
+  if (Date.now() < game.ignoreClickUntil) {
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
@@ -2056,6 +2176,97 @@ canvas.addEventListener("click", (event) => {
   const hex = pixelToAxial(world.x, world.y, currentHexSize());
   clickPlacement(hex);
 });
+
+canvas.addEventListener("touchstart", (event) => {
+  if (event.touches.length === 1) {
+    const t = event.touches[0];
+    game.isPanning = true;
+    game.touchPanMoved = false;
+    game.panLast = { x: t.clientX, y: t.clientY };
+    game.touchPinchState = null;
+    return;
+  }
+
+  if (event.touches.length === 2) {
+    const t0 = event.touches[0];
+    const t1 = event.touches[1];
+    const rect = canvas.getBoundingClientRect();
+    const centerX = ((t0.clientX + t1.clientX) / 2) - rect.left;
+    const centerY = ((t0.clientY + t1.clientY) / 2) - rect.top;
+    game.touchPinchState = {
+      distance: Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY),
+      worldBefore: screenToWorld(centerX, centerY)
+    };
+    game.isPanning = false;
+  }
+}, { passive: true });
+
+canvas.addEventListener("touchmove", (event) => {
+  if (event.touches.length === 1 && game.isPanning) {
+    const t = event.touches[0];
+    const dx = t.clientX - game.panLast.x;
+    const dy = t.clientY - game.panLast.y;
+    if (dx !== 0 || dy !== 0) {
+      game.viewport.offsetX += dx;
+      game.viewport.offsetY += dy;
+      game.panLast = { x: t.clientX, y: t.clientY };
+      if (!game.touchPanMoved && Math.hypot(dx, dy) > 3) {
+        game.touchPanMoved = true;
+      }
+      render();
+    }
+    return;
+  }
+
+  if (event.touches.length === 2 && game.touchPinchState) {
+    event.preventDefault();
+    const t0 = event.touches[0];
+    const t1 = event.touches[1];
+    const rect = canvas.getBoundingClientRect();
+    const centerX = ((t0.clientX + t1.clientX) / 2) - rect.left;
+    const centerY = ((t0.clientY + t1.clientY) / 2) - rect.top;
+    const distance = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    const ratio = game.touchPinchState.distance > 0 ? distance / game.touchPinchState.distance : 1;
+    game.viewport.zoom = Math.min(3.8, Math.max(0.33, game.viewport.zoom * ratio));
+    game.touchPinchState.distance = distance;
+
+    const after = screenToWorld(centerX, centerY);
+    const before = game.touchPinchState.worldBefore;
+    game.viewport.offsetX += (after.x - before.x);
+    game.viewport.offsetY += (after.y - before.y);
+    game.touchPinchState.worldBefore = screenToWorld(centerX, centerY);
+    render();
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchend", (event) => {
+  if (event.touches.length === 0) {
+    if (!game.touchPanMoved) {
+      const t = event.changedTouches[0];
+      if (t) {
+        const rect = canvas.getBoundingClientRect();
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        const world = screenToWorld(x, y);
+        const hex = pixelToAxial(world.x, world.y, currentHexSize());
+        clickPlacement(hex);
+        game.ignoreClickUntil = Date.now() + 500;
+      }
+    }
+    game.isPanning = false;
+    game.touchPanMoved = false;
+    game.touchPinchState = null;
+    return;
+  }
+
+  if (event.touches.length === 1) {
+    const t = event.touches[0];
+    game.isPanning = true;
+    game.panLast = { x: t.clientX, y: t.clientY };
+    game.touchPanMoved = false;
+    game.touchPinchState = null;
+  }
+}, { passive: true });
 
 ui.newGameBtn.addEventListener("click", () => {
   if (!canUseAdminControls()) {
@@ -2083,6 +2294,11 @@ ui.applyTimerBtn.addEventListener("click", () => {
   newGame(getSelectedModeKeys(), timerConfig);
 });
 
+ui.toggleMenuBtn.addEventListener("click", () => {
+  const isCollapsed = ui.appRoot.classList.contains("menuCollapsed");
+  setOptionsMenuCollapsed(!isCollapsed);
+});
+
 function refreshTimerSummaryFromInputs() {
   const timerConfig = getTimerConfigFromInputs();
   ui.timerSummaryText.textContent = timerConfig.enabled
@@ -2107,10 +2323,16 @@ ui.onlineLeaveBtn.addEventListener("click", () => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+ui.appRoot.addEventListener("transitionend", (event) => {
+  if (event.target === ui.appRoot || event.target === canvas || event.target.classList?.contains("sidebar")) {
+    resizeCanvas();
+  }
+});
 
 fillModePicker();
 setTimerInputs(game.timerConfig);
 updateOnlineStatusUI();
+setOptionsMenuCollapsed(false);
 setSelectedModeKeys([]);
 newGame([], game.timerConfig);
 resizeCanvas();

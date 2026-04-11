@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="./hex_tictactoe_absurd_modes.css" />
 </head>
 <body>
-  <div class="app">
+  <div id="appRoot" class="app">
     <aside class="sidebar">
       <section class="titleCard">
         <h1>Infinite Hex Tic-Tac-Toe</h1>
@@ -106,6 +106,7 @@
 
     <main class="boardWrap">
       <canvas id="board"></canvas>
+      <button id="toggleMenuBtn" class="menuToggleButton" type="button" aria-pressed="false" aria-label="Hide options menu">Hide menu</button>
       <div class="overlay">
         <div class="badge">
           <div id="overlayTitle">Classic</div>
