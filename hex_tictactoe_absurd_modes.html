@@ -39,6 +39,16 @@
           Enable game timer
         </label>
         <div style="height: 10px"></div>
+        <div class="grid2">
+          <select id="turnOrderInput" aria-label="Who goes first">
+            <option value="p1First">Player 1 first</option>
+            <option value="p2First">Player 2 first</option>
+            <option value="random">Random first</option>
+          </select>
+          <div class="small turnOrderSummary" id="turnOrderSummaryText">Player 1 starts</div>
+        </div>
+        <div class="small" style="margin-top: 8px;">Choose who starts, or randomise it for each new game.</div>
+        <div style="height: 10px"></div>
         <div class="controls">
           <button id="applyTimerBtn">Apply Timer</button>
           <div class="small" id="timerSummaryText" style="align-self: center;">5m +2s</div>
@@ -117,6 +127,16 @@
           <div id="zoomText" class="small">Zoom 1.00x</div>
         </div>
       </div>
+      <div class="boardClocks" aria-live="polite">
+        <div id="boardClockP2" class="boardClock boardClockP2">
+          <div class="boardClockLabel">Player 2</div>
+          <div id="boardClockP2Time" class="boardClockTime">05:00</div>
+        </div>
+        <div id="boardClockP1" class="boardClock boardClockP1 active">
+          <div class="boardClockLabel">Player 1</div>
+          <div id="boardClockP1Time" class="boardClockTime">05:00</div>
+        </div>
+      </div>
       <div class="help">
         <div><span class="legendDot" style="background: var(--p1)"></span>Player 1</div>
         <div><span class="legendDot" style="background: var(--p2)"></span>Player 2</div>
@@ -129,5 +149,6 @@
   <script src="./hex_tictactoe_timer_helpers.js"></script>
   <script src="./hex_tictactoe_half_and_half_helpers.js"></script>
   <script src="./hex_tictactoe_absurd_modes.js"></script>
+  <script src="./hex_tictactoe_turn_order_patch.js"></script>
 </body>
 </html>
