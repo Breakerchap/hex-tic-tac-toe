@@ -192,6 +192,7 @@ body::after {
 
 .controls button,
 .controls input,
+.controls select,
 .modeToggle,
 .secondaryButton {
   width: 100%;
@@ -207,6 +208,7 @@ body::after {
 
 button:hover,
 input:hover,
+select:hover,
 .modeToggle:hover,
 .secondaryButton:hover {
   transform: translateY(-1px);
@@ -218,6 +220,16 @@ input:hover,
 button.primary {
   background: linear-gradient(180deg, rgba(109, 198, 255, 0.30), rgba(109, 198, 255, 0.12));
   border-color: rgba(109, 198, 255, 0.28);
+}
+
+.turnOrderSummary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .modePickerGrid {
@@ -310,7 +322,7 @@ button.primary {
 .menuToggleButton {
   position: absolute;
   top: 16px;
-  left: 16px;
+  right: 16px;
   z-index: 6;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
@@ -363,10 +375,70 @@ canvas {
   margin-top: 2px;
 }
 
-.help {
+.boardClocks {
   position: absolute;
   right: 16px;
   bottom: 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.boardClock {
+  min-width: 180px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(8, 12, 26, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  opacity: 0.9;
+  transform: scale(0.98);
+  transition: transform 0.16s ease, opacity 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.boardClock.active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.boardClockP1.active {
+  border-color: rgba(109, 198, 255, 0.6);
+  box-shadow: 0 0 0 1px rgba(109, 198, 255, 0.18), var(--shadow);
+}
+
+.boardClockP2.active {
+  border-color: rgba(255, 140, 140, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 140, 140, 0.18), var(--shadow);
+}
+
+.boardClock.flagged {
+  border-color: rgba(255, 179, 92, 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 179, 92, 0.25), var(--shadow);
+}
+
+.boardClockLabel {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.boardClockTime {
+  margin-top: 4px;
+  font-size: 2rem;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.help {
+  position: absolute;
+  right: 16px;
+  bottom: 176px;
   background: rgba(8, 12, 26, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -429,6 +501,7 @@ canvas {
 
   .controls button,
   .controls input,
+  .controls select,
   .modeToggle,
   .secondaryButton {
     min-height: 44px;
@@ -452,7 +525,7 @@ canvas {
 
   .menuToggleButton {
     top: 10px;
-    left: 10px;
+    right: 10px;
     padding: 8px 12px;
     font-size: 0.84rem;
   }
@@ -461,6 +534,22 @@ canvas {
     min-width: 0;
     padding: 8px 10px;
     border-radius: 11px;
+  }
+
+  .boardClocks {
+    right: 10px;
+    bottom: 10px;
+    gap: 8px;
+  }
+
+  .boardClock {
+    min-width: 144px;
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .boardClockTime {
+    font-size: 1.55rem;
   }
 
   .help {
