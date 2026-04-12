@@ -2336,3 +2336,20 @@ setOptionsMenuCollapsed(false);
 setSelectedModeKeys([]);
 newGame([], game.timerConfig);
 resizeCanvas();
+
+window.HexTicTacToeInternals = {
+  ui,
+  game,
+  normaliseTimerConfig,
+  ensureClockState,
+  setTimerInputs,
+  syncClockTickerFromState,
+  render,
+  centreBoard,
+  broadcastOnlineState,
+  makeInitialState,
+  getSelectedModeKeys,
+  formatClock,
+  updateClockUI,
+  updateStatus
+};
