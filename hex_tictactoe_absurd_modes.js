@@ -43,8 +43,12 @@ const ui = {
 
 const SQRT3 = Math.sqrt(3);
 const WIN_LENGTH = 6;
-const MAX_PLACEMENT_DISTANCE = 8;
+const MAX_PLACEMENT_DISTANCE = 11;
 const CLOCK_TICK_MS = 100;
+const GRID_TARGET_HEXES_PER_FRAME = 3600;
+const GRID_HINT_MIN_HEX_SIZE = 9;
+const GRID_LOW_DETAIL_HEX_SIZE = 9;
+const GRID_VERY_LOW_DETAIL_HEX_SIZE = 6;
 const DEFAULT_TIMER_CONFIG = {
   enabled: true,
   initialMinutes: 5,
@@ -1760,6 +1764,26 @@ function drawHex(x, y, size, fill, stroke, lineWidth = 1) {
   }
 }
 
+function getGridDrawStep(bounds, size) {
+  const spanQ = Math.max(1, bounds.maxQ - bounds.minQ + 1);
+  const spanR = Math.max(1, bounds.maxR - bounds.minR + 1);
+  const estimatedHexes = spanQ * spanR;
+
+  let step = 1;
+  if (size < GRID_LOW_DETAIL_HEX_SIZE) {
+    step = 2;
+  }
+  if (size < GRID_VERY_LOW_DETAIL_HEX_SIZE) {
+    step = 3;
+  }
+
+  if (estimatedHexes > GRID_TARGET_HEXES_PER_FRAME) {
+    step = Math.max(step, Math.ceil(Math.sqrt(estimatedHexes / GRID_TARGET_HEXES_PER_FRAME)));
+  }
+
+  return step;
+}
+
 function drawGrid() {
   const size = currentHexSize();
   const w = canvas.clientWidth;
@@ -1770,11 +1794,21 @@ function drawGrid() {
     offsetX: game.viewport.offsetX,
     offsetY: game.viewport.offsetY,
     hexSize: size,
-    marginHexes: 2
+    marginHexes: size < GRID_LOW_DETAIL_HEX_SIZE ? 1 : 2
   });
+  const drawStep = getGridDrawStep(bounds, size);
+  const showPlacementHints = (
+    size >= GRID_HINT_MIN_HEX_SIZE
+    && canActForCurrentTurn()
+    && !game.state.winner
+    && !game.state.duckPhase
+  );
+  const gridStroke = drawStep > 1 ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.08)";
+  const gridFill = drawStep > 1 ? "rgba(255, 255, 255, 0.018)" : "rgba(255, 255, 255, 0.025)";
+  let hoverDrawn = false;
 
-  for (let r = bounds.minR; r <= bounds.maxR; r += 1) {
-    for (let q = bounds.minQ; q <= bounds.maxQ; q += 1) {
+  for (let r = bounds.minR; r <= bounds.maxR; r += drawStep) {
+    for (let q = bounds.minQ; q <= bounds.maxQ; q += drawStep) {
       const hex = { q, r };
       const world = axialToPixel(hex, size);
       const screen = worldToScreen(world.x, world.y);
@@ -1782,20 +1816,37 @@ function drawGrid() {
         continue;
       }
 
-      let fill = "rgba(255, 255, 255, 0.025)";
-      let stroke = "rgba(255, 255, 255, 0.08)";
+      let fill = gridFill;
+      let stroke = gridStroke;
+      let legalPlacement = true;
 
       if (usesPanicBirdMode(game.state) && game.state.panicZones[keyOf(hex.q, hex.r)]) {
         fill = "rgba(255, 179, 92, 0.16)";
         stroke = "rgba(255, 179, 92, 0.46)";
       }
 
+      if (showPlacementHints) {
+        legalPlacement = isLegalPlacement(game.state, hex);
+        if (!legalPlacement) {
+          stroke = null;
+        }
+      }
+
       if (equalHex(hex, game.hoverHex)) {
+        hoverDrawn = true;
         fill = "rgba(255, 255, 255, 0.08)";
         stroke = "rgba(255, 255, 255, 0.25)";
       }
 
       drawHex(screen.x, screen.y, size - 1, fill, stroke, 1);
+    }
+  }
+
+  if (!hoverDrawn) {
+    const world = axialToPixel(game.hoverHex, size);
+    const screen = worldToScreen(world.x, world.y);
+    if (screen.x >= -size * 2 && screen.y >= -size * 2 && screen.x <= w + size * 2 && screen.y <= h + size * 2) {
+      drawHex(screen.x, screen.y, size - 1, "rgba(255, 255, 255, 0.08)", "rgba(255, 255, 255, 0.25)", 1);
     }
   }
 }
@@ -1839,6 +1890,9 @@ function drawEchoTargets() {
   }
 
   const size = currentHexSize();
+  if (size < 8) {
+    return;
+  }
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
 
@@ -1879,6 +1933,9 @@ function drawMeteorPreview() {
   }
 
   const size = currentHexSize();
+  if (size < 8) {
+    return;
+  }
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   const { farthestDistance, farthest } = getMeteorTargets(game.state);
@@ -1923,6 +1980,9 @@ function drawOrbitPreview() {
   }
 
   const size = currentHexSize();
+  if (size < 9) {
+    return;
+  }
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
 
@@ -2007,6 +2067,8 @@ function drawPieces() {
   const size = currentHexSize();
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
+  const lowDetail = size < GRID_LOW_DETAIL_HEX_SIZE;
+  const veryLowDetail = size < GRID_VERY_LOW_DETAIL_HEX_SIZE;
   const recentSerials = getRecentSerials(game.state.cells);
   const recentSerialSet = new Set(recentSerials);
   const newestSerial = recentSerials[0];
@@ -2020,7 +2082,7 @@ function drawPieces() {
     }
 
     const colour = cell.owner === 1 ? "#6dc6ff" : "#ff8c8c";
-    if (recentSerialSet.has(cell.serial)) {
+    if (!lowDetail && recentSerialSet.has(cell.serial)) {
       const isNewest = cell.serial === newestSerial;
       const recentStroke = isHalfAndHalfCell(cell)
         ? "rgba(255, 255, 255, 0.85)"
@@ -2035,7 +2097,7 @@ function drawPieces() {
       );
     }
 
-    if (isHalfAndHalfCell(cell)) {
+    if (isHalfAndHalfCell(cell) && !lowDetail) {
       const control = getCellControl(cell);
       const splitAt = Math.min(0.98, Math.max(0.02, control[1]));
       const blend = ctx.createLinearGradient(
@@ -2067,12 +2129,26 @@ function drawPieces() {
         screen.y - size * 0.84
       );
     } else {
-      drawHex(screen.x, screen.y, size * 0.78, colour, "rgba(255,255,255,0.45)", 1.5);
+      let fillColour = colour;
+      if (isHalfAndHalfCell(cell)) {
+        const control = getCellControl(cell);
+        fillColour = control[1] >= control[2] ? "#6dc6ff" : "#ff8c8c";
+      }
+      drawHex(
+        screen.x,
+        screen.y,
+        size * 0.78,
+        fillColour,
+        lowDetail ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.45)",
+        lowDetail ? 1 : 1.5
+      );
     }
-    ctx.fillStyle = "rgba(6, 12, 23, 0.52)";
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, size * 0.28, 0, Math.PI * 2);
-    ctx.fill();
+    if (!veryLowDetail) {
+      ctx.fillStyle = "rgba(6, 12, 23, 0.52)";
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, size * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   for (const { birdKind, hex } of getBirdEntries(game.state)) {

@@ -48,7 +48,7 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 - Player 1 opens with **1 placement**.
 - Every turn after that uses **2 placements**.
 - The first move must be at **(0, 0)**.
-- Later placements must be within **8 hexes** of an existing occupied hex.
+- Later placements must be within **11 hexes** of an existing occupied hex.
 - A line of **6 stones** wins.
 
 ## Controls
