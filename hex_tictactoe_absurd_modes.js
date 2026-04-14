@@ -409,11 +409,19 @@ const online = {
   pendingAction: null,
   isConnected: false,
   roomCode: "",
+  desiredRoomCode: "",
   clientId: null,
   assignedPlayer: null,
   lastRevision: 0,
-  applyingRemoteState: false
+  applyingRemoteState: false,
+  latestPlayerAssignments: null,
+  reconnectTimerId: null,
+  reconnectDelayMs: 1000,
+  isIntentionalDisconnect: false
 };
+
+const ONLINE_RECONNECT_BASE_MS = 1000;
+const ONLINE_RECONNECT_MAX_MS = 10000;
 
 function normaliseModeKeys(modeKeys) {
   const seen = new Set();
@@ -693,12 +701,15 @@ function syncClockTickerFromState() {
 }
 
 function canUseAdminControls() {
-  return !online.roomCode || online.assignedPlayer === 1;
+  return (!online.roomCode && !online.desiredRoomCode) || online.assignedPlayer === 1;
 }
 
 function canActForCurrentTurn() {
-  if (!online.roomCode) {
+  if (!online.roomCode && !online.desiredRoomCode) {
     return true;
+  }
+  if (!online.roomCode) {
+    return false;
   }
   if (online.assignedPlayer == null) {
     return false;
@@ -707,7 +718,7 @@ function canActForCurrentTurn() {
 }
 
 function updateOnlineControls() {
-  const inRoom = Boolean(online.roomCode);
+  const inRoom = Boolean(online.roomCode || online.desiredRoomCode);
   const admin = canUseAdminControls();
   ui.onlineCreateBtn.disabled = inRoom;
   ui.onlineJoinBtn.disabled = inRoom;
@@ -725,14 +736,93 @@ function updateOnlineControls() {
 }
 
 function updateOnlineStatusUI() {
-  ui.onlineStatusText.textContent = `Online: ${online.isConnected ? "connected" : "offline"}`;
-  ui.onlineRoomText.textContent = online.roomCode ? `Room: ${online.roomCode}` : "Room: -";
+  const reconnecting = !online.isConnected && Boolean(online.desiredRoomCode);
+  ui.onlineStatusText.textContent = reconnecting
+    ? "Online: reconnecting..."
+    : `Online: ${online.isConnected ? "connected" : "offline"}`;
+  ui.onlineRoomText.textContent = online.roomCode
+    ? `Room: ${online.roomCode}`
+    : (online.desiredRoomCode ? `Room: ${online.desiredRoomCode}` : "Room: -");
   const role = online.assignedPlayer == null ? "spectator" : `player ${online.assignedPlayer}`;
-  ui.onlineRoleText.textContent = online.roomCode ? `Role: ${role}` : "Role: local";
+  ui.onlineRoleText.textContent = (online.roomCode || online.desiredRoomCode)
+    ? `Role: ${role}`
+    : "Role: local";
   updateOnlineControls();
 }
 
+function clearOnlineReconnectTimer() {
+  if (online.reconnectTimerId) {
+    window.clearTimeout(online.reconnectTimerId);
+    online.reconnectTimerId = null;
+  }
+}
+
+function scheduleOnlineReconnect(roomCode) {
+  if (!roomCode || online.isIntentionalDisconnect || online.reconnectTimerId) {
+    return;
+  }
+
+  const delayMs = online.reconnectDelayMs;
+  online.reconnectTimerId = window.setTimeout(() => {
+    online.reconnectTimerId = null;
+    connectOnline(() => {
+      sendOnlineMessage({ type: "joinRoom", roomCode });
+    });
+  }, delayMs);
+
+  online.reconnectDelayMs = Math.min(
+    ONLINE_RECONNECT_MAX_MS,
+    Math.round(delayMs * 1.8)
+  );
+
+  pushLog(`Connection lost. Reconnecting in ${Math.max(1, Math.round(delayMs / 1000))}s...`);
+  updateStatus();
+}
+
+function normaliseSocketUrl(rawUrl) {
+  const text = String(rawUrl || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(text, window.location.href);
+    if (parsed.protocol === "https:") {
+      parsed.protocol = "wss:";
+    } else if (parsed.protocol === "http:") {
+      parsed.protocol = "ws:";
+    }
+
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return null;
+    }
+
+    if (!parsed.pathname || parsed.pathname === "/") {
+      parsed.pathname = "/ws";
+    }
+
+    return parsed.toString();
+  } catch (error) {
+    return null;
+  }
+}
+
 function getSocketUrl() {
+  const queryUrl = normaliseSocketUrl(new URLSearchParams(window.location.search).get("ws"));
+  if (queryUrl) {
+    return queryUrl;
+  }
+
+  const metaUrl = normaliseSocketUrl(document.querySelector('meta[name="hex-ws-url"]')?.content);
+  if (metaUrl) {
+    return metaUrl;
+  }
+
+  const globalUrl = normaliseSocketUrl(window.HEX_TTT_WS_URL);
+  if (globalUrl) {
+    return globalUrl;
+  }
+
   if (!window.location.host) {
     return null;
   }
@@ -740,7 +830,9 @@ function getSocketUrl() {
   return `${protocol}://${window.location.host}/ws`;
 }
 
-function closeOnlineSocket() {
+function closeOnlineSocket(intentional = false) {
+  online.isIntentionalDisconnect = intentional;
+  clearOnlineReconnectTimer();
   if (online.socket) {
     online.socket.close();
     online.socket = null;
@@ -773,11 +865,14 @@ function connectOnline(afterConnect) {
     return;
   }
 
+  online.isIntentionalDisconnect = false;
+  clearOnlineReconnectTimer();
   online.pendingAction = afterConnect || null;
   online.socket = new WebSocket(wsUrl);
 
   online.socket.addEventListener("open", () => {
     online.isConnected = true;
+    online.reconnectDelayMs = ONLINE_RECONNECT_BASE_MS;
     updateOnlineStatusUI();
     if (online.pendingAction) {
       const action = online.pendingAction;
@@ -795,22 +890,36 @@ function connectOnline(afterConnect) {
     }
   });
 
+  online.socket.addEventListener("error", () => {
+    console.warn("Online socket error");
+  });
+
   online.socket.addEventListener("close", () => {
+    const roomToRecover = online.desiredRoomCode || online.roomCode;
+    const shouldReconnect = Boolean(roomToRecover) && !online.isIntentionalDisconnect;
     online.isConnected = false;
     online.roomCode = "";
     online.assignedPlayer = null;
     online.clientId = null;
     online.lastRevision = 0;
+    online.latestPlayerAssignments = null;
     online.pendingAction = null;
+    online.socket = null;
     updateOnlineStatusUI();
+    if (shouldReconnect) {
+      scheduleOnlineReconnect(roomToRecover);
+    }
   });
 }
 
 function updateAssignmentFromMessage(message) {
-  if (!message.playerAssignments || !online.clientId) {
+  if (message && message.playerAssignments && typeof message.playerAssignments === "object") {
+    online.latestPlayerAssignments = message.playerAssignments;
+  }
+  if (!online.latestPlayerAssignments || !online.clientId) {
     return;
   }
-  online.assignedPlayer = message.playerAssignments[online.clientId] || null;
+  online.assignedPlayer = online.latestPlayerAssignments[online.clientId] || null;
 }
 
 function applyRemoteState(state, revision) {
@@ -839,12 +948,16 @@ function applyRemoteState(state, revision) {
 function handleOnlineMessage(message) {
   if (message.type === "welcome") {
     online.clientId = message.clientId;
+    updateAssignmentFromMessage(null);
     updateOnlineStatusUI();
     return;
   }
 
   if (message.type === "roomJoined") {
     online.roomCode = message.roomCode || "";
+    online.desiredRoomCode = online.roomCode;
+    clearOnlineReconnectTimer();
+    online.reconnectDelayMs = ONLINE_RECONNECT_BASE_MS;
     updateAssignmentFromMessage(message);
     if (typeof message.revision === "number") {
       online.lastRevision = message.revision;
@@ -866,7 +979,7 @@ function handleOnlineMessage(message) {
 
   if (message.type === "stateUpdate") {
     updateAssignmentFromMessage(message);
-    if (typeof message.revision === "number" && message.revision <= online.lastRevision) {
+    if (typeof message.revision === "number" && message.revision < online.lastRevision) {
       return;
     }
     applyRemoteState(message.state, message.revision);
@@ -874,12 +987,20 @@ function handleOnlineMessage(message) {
   }
 
   if (message.type === "error" && message.message) {
-    pushLog(`Online error: ${message.message}`);
+    if (message.code === "NOT_YOUR_TURN") {
+      pushLog("Online: you can only move on your own turn.");
+    } else if (message.code === "STALE_STATE") {
+      pushLog("Online: game state was stale, synced to latest room state.");
+    } else {
+      pushLog(`Online error: ${message.message}`);
+    }
     updateStatus();
   }
 }
 
 function createOnlineRoom() {
+  online.desiredRoomCode = "";
+  online.reconnectDelayMs = ONLINE_RECONNECT_BASE_MS;
   connectOnline(() => {
     sendOnlineMessage({ type: "createRoom" });
   });
@@ -892,6 +1013,8 @@ function joinOnlineRoom() {
     updateStatus();
     return;
   }
+  online.desiredRoomCode = roomCode;
+  online.reconnectDelayMs = ONLINE_RECONNECT_BASE_MS;
   connectOnline(() => {
     sendOnlineMessage({ type: "joinRoom", roomCode });
   });
@@ -902,9 +1025,11 @@ function leaveOnlineRoom() {
     sendOnlineMessage({ type: "leaveRoom" });
   }
   online.roomCode = "";
+  online.desiredRoomCode = "";
   online.assignedPlayer = null;
   online.lastRevision = 0;
-  closeOnlineSocket();
+  online.latestPlayerAssignments = null;
+  closeOnlineSocket(true);
   updateOnlineStatusUI();
 }
 
@@ -917,8 +1042,10 @@ function broadcastOnlineState() {
   }
   sendOnlineMessage({
     type: "stateUpdate",
+    baseRevision: online.lastRevision,
     state: game.state
   });
+  online.lastRevision += 1;
 }
 
 function saveHistory() {

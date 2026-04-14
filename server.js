@@ -6,6 +6,8 @@ const { WebSocketServer } = require("ws");
 
 const ROOT_DIR = __dirname;
 const DEFAULT_PORT = 8080;
+const DEFAULT_WS_PATH = "/ws";
+const DEFAULT_WS_HEARTBEAT_MS = 25000;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -37,6 +39,55 @@ function parsePort() {
 }
 
 const PORT = parsePort();
+
+function normaliseWsPath(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return DEFAULT_WS_PATH;
+  }
+
+  let value = raw;
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+  value = value.replace(/\/+$/, "");
+  return value || "/";
+}
+
+function parseWsPath() {
+  if (process.env.WS_PATH) {
+    return normaliseWsPath(process.env.WS_PATH);
+  }
+
+  const arg = process.argv.find((entry) => entry.startsWith("--ws-path="));
+  if (arg) {
+    return normaliseWsPath(arg.split("=")[1]);
+  }
+
+  return DEFAULT_WS_PATH;
+}
+
+function parseWsHeartbeatMs() {
+  if (process.env.WS_HEARTBEAT_MS) {
+    const envValue = Number(process.env.WS_HEARTBEAT_MS);
+    if (Number.isInteger(envValue) && envValue >= 5000) {
+      return envValue;
+    }
+  }
+
+  const arg = process.argv.find((entry) => entry.startsWith("--ws-heartbeat-ms="));
+  if (arg) {
+    const value = Number(arg.split("=")[1]);
+    if (Number.isInteger(value) && value >= 5000) {
+      return value;
+    }
+  }
+
+  return DEFAULT_WS_HEARTBEAT_MS;
+}
+
+const WS_PATH = parseWsPath();
+const WS_HEARTBEAT_MS = parseWsHeartbeatMs();
 
 function safeJoin(requestPath) {
   let decoded = requestPath.split("?")[0];
@@ -79,6 +130,12 @@ const server = http.createServer((req, res) => {
 
   if (req.url === "/") {
     sendFile(res, path.join(ROOT_DIR, "hex_tictactoe_absurd_modes.html"));
+    return;
+  }
+
+  if (req.url === "/healthz") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 
@@ -127,6 +184,42 @@ function getPlayerAssignments(room) {
     }
   }
   return assignments;
+}
+
+function getExpectedTurnPlayer(room) {
+  if (!room || !room.state || typeof room.state !== "object") {
+    return 1;
+  }
+  return room.state.turnPlayer === 2 ? 2 : 1;
+}
+
+function buildStatePayload(room, byClientId = null) {
+  return {
+    type: "stateUpdate",
+    roomCode: room.code,
+    revision: room.revision,
+    state: room.state,
+    playerAssignments: getPlayerAssignments(room),
+    byClientId
+  };
+}
+
+function sendRoomState(ws, room, byClientId = null) {
+  send(ws, buildStatePayload(room, byClientId));
+}
+
+function broadcastRoomState(room, byClientId = null) {
+  const payload = buildStatePayload(room, byClientId);
+  for (const member of room.members) {
+    send(member, payload);
+  }
+}
+
+function rejectStateUpdate(ws, room, code, message) {
+  send(ws, { type: "error", code, message });
+  if (room && room.state) {
+    sendRoomState(ws, room, null);
+  }
 }
 
 function broadcastRoomPresence(roomCode) {
@@ -253,22 +346,50 @@ function handleStateUpdate(ws, message) {
     return;
   }
 
+  if (!Number.isInteger(message.baseRevision)) {
+    rejectStateUpdate(
+      ws,
+      room,
+      "MISSING_BASE_REVISION",
+      "Missing or invalid base revision for state update."
+    );
+    return;
+  }
+
+  if (message.baseRevision !== room.revision) {
+    rejectStateUpdate(
+      ws,
+      room,
+      "STALE_STATE",
+      `Outdated revision. Server is at revision ${room.revision}.`
+    );
+    return;
+  }
+
+  if (meta.playerSlot !== 1 && meta.playerSlot !== 2) {
+    rejectStateUpdate(
+      ws,
+      room,
+      "SPECTATOR_CANNOT_MOVE",
+      "Spectators cannot submit game moves."
+    );
+    return;
+  }
+
+  const expectedTurnPlayer = getExpectedTurnPlayer(room);
+  if (meta.playerSlot !== expectedTurnPlayer) {
+    rejectStateUpdate(
+      ws,
+      room,
+      "NOT_YOUR_TURN",
+      `It is player ${expectedTurnPlayer}'s turn.`
+    );
+    return;
+  }
+
   room.revision += 1;
   room.state = message.state;
-
-  const playerAssignments = getPlayerAssignments(room);
-  const payload = {
-    type: "stateUpdate",
-    roomCode: room.code,
-    revision: room.revision,
-    state: room.state,
-    playerAssignments,
-    byClientId: meta.clientId
-  };
-
-  for (const member of room.members) {
-    send(member, payload);
-  }
+  broadcastRoomState(room, meta.clientId);
 }
 
 function handleMessage(ws, message) {
@@ -307,7 +428,13 @@ function handleMessage(ws, message) {
 }
 
 server.on("upgrade", (req, socket, head) => {
-  if (!req.url || req.url.split("?")[0] !== "/ws") {
+  if (!req.url) {
+    socket.destroy();
+    return;
+  }
+
+  const pathname = req.url.split("?")[0].replace(/\/+$/, "") || "/";
+  if (pathname !== WS_PATH) {
     socket.destroy();
     return;
   }
@@ -319,9 +446,21 @@ server.on("upgrade", (req, socket, head) => {
 
 wss.on("connection", (ws) => {
   const clientId = newClientId();
-  clients.set(ws, { clientId, roomCode: null, playerSlot: null });
+  clients.set(ws, {
+    clientId,
+    roomCode: null,
+    playerSlot: null,
+    isAlive: true
+  });
 
   send(ws, { type: "welcome", clientId });
+
+  ws.on("pong", () => {
+    const meta = clients.get(ws);
+    if (meta) {
+      meta.isAlive = true;
+    }
+  });
 
   ws.on("message", (raw) => {
     try {
@@ -338,7 +477,37 @@ wss.on("connection", (ws) => {
   });
 });
 
+const wsHeartbeatInterval = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.readyState !== 1) {
+      continue;
+    }
+
+    const meta = clients.get(ws);
+    if (!meta) {
+      continue;
+    }
+
+    if (!meta.isAlive) {
+      ws.terminate();
+      continue;
+    }
+
+    meta.isAlive = false;
+    try {
+      ws.ping();
+    } catch (error) {
+      ws.terminate();
+    }
+  }
+}, WS_HEARTBEAT_MS);
+
+wss.on("close", () => {
+  clearInterval(wsHeartbeatInterval);
+});
+
 server.listen(PORT, () => {
   console.log(`Hex Tic-Tac-Toe server listening on http://localhost:${PORT}`);
-  console.log(`WebSocket endpoint: ws://localhost:${PORT}/ws`);
+  console.log(`WebSocket endpoint: ws://localhost:${PORT}${WS_PATH}`);
+  console.log(`WebSocket heartbeat: ${WS_HEARTBEAT_MS}ms`);
 });
