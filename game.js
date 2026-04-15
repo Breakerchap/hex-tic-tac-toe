@@ -524,6 +524,7 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
     pendingEchoes: [],
     lastPlacedThisTurn: [],
     lastPlacement: null,
+    recentBirdEvents: [],
     lastPlacedByPlayer: { 1: null, 2: null },
     moveSerial: 0,
     log: ["Game started."],
@@ -1194,6 +1195,46 @@ function getBirdEchoCopyEntries(state) {
     .map((birdKind) => ({ birdKind, hex: state.birdEchoCopies[birdKind] }));
 }
 
+function ensureRecentBirdEventsState(state) {
+  if (!Array.isArray(state.recentBirdEvents)) {
+    state.recentBirdEvents = [];
+  }
+}
+
+function recordRecentBirdEvent(state, event) {
+  ensureRecentBirdEventsState(state);
+  state.recentBirdEvents.push({
+    completedTurn: state.turnCount + 1,
+    birdKind: event.birdKind === "kingDuck" ? "kingDuck" : "duck",
+    source: event.source === "swarm" ? "swarm" : "moving",
+    action: event.action === "remove" ? "remove" : "place",
+    hex: { q: event.hex.q, r: event.hex.r }
+  });
+  if (state.recentBirdEvents.length > 20) {
+    state.recentBirdEvents = state.recentBirdEvents.slice(-20);
+  }
+}
+
+function pruneRecentBirdEvents(state) {
+  ensureRecentBirdEventsState(state);
+  state.recentBirdEvents = state.recentBirdEvents.filter((event) => (
+    Number.isInteger(event.completedTurn) && event.completedTurn >= state.turnCount
+  ));
+}
+
+function getLastTurnBirdEvents(state) {
+  ensureRecentBirdEventsState(state);
+  if (!state.turnCount) {
+    return [];
+  }
+  return state.recentBirdEvents.filter((event) => (
+    event.completedTurn === state.turnCount
+      && event.hex
+      && Number.isFinite(event.hex.q)
+      && Number.isFinite(event.hex.r)
+  ));
+}
+
 function getCellAt(state, hex) {
   return state.cells[keyOf(hex.q, hex.r)] || null;
 }
@@ -1620,6 +1661,7 @@ function endTurn(state) {
   const previousPlayer = state.turnPlayer;
   state.turnCount += 1;
   state.round += 1;
+  pruneRecentBirdEvents(state);
 
   resolveEchoes(state);
   resolveOrbit(state);
@@ -1701,6 +1743,12 @@ function clickPlacement(hex) {
       saveHistory();
       moveBird(state, hex, birdAction.birdKind);
       syncBirdEchoCopy(state, birdAction.birdKind);
+      recordRecentBirdEvent(state, {
+        birdKind: birdAction.birdKind,
+        source: "moving",
+        action: "place",
+        hex
+      });
       pushLog(`${getBirdMoveTitle(birdAction.birdKind)} moved to (${hex.q}, ${hex.r}).`);
     } else {
       const swarmKind = birdAction.birdKind;
@@ -1712,6 +1760,12 @@ function clickPlacement(hex) {
       if (!swarmAction) {
         return;
       }
+      recordRecentBirdEvent(state, {
+        birdKind: swarmKind,
+        source: "swarm",
+        action: swarmAction.action,
+        hex
+      });
       const verb = swarmAction.action === "remove" ? "removed from" : "placed at";
       pushLog(`${getBirdMoveTitle(swarmKind)} swarm ${verb} (${hex.q}, ${hex.r}).`);
     }
@@ -2107,10 +2161,11 @@ function drawBirdEchoCopy(birdKind, copyHex, size) {
   ctx.restore();
 }
 
-function drawBirdPiece(birdKind, birdHex, size) {
+function drawBirdPiece(birdKind, birdHex, size, birdSource = "moving") {
   const world = axialToPixel(birdHex, size);
   const screen = worldToScreen(world.x, world.y);
   const isKingDuck = birdKind === "kingDuck";
+  const isSwarmBird = birdSource === "swarm";
   const fill = isKingDuck ? "#ffcf63" : "#ffd75e";
   const stroke = isKingDuck ? "rgba(255, 179, 92, 0.95)" : "rgba(255,255,255,0.55)";
 
@@ -2128,6 +2183,12 @@ function drawBirdPiece(birdKind, birdHex, size) {
   if (isKingDuck) {
     ctx.font = `${Math.max(11, size * 0.5)}px system-ui`;
     ctx.fillText("\u{1F451}", screen.x, screen.y - size * 0.48);
+  }
+
+  if (isSwarmBird) {
+    ctx.font = `${Math.max(9, size * 0.31)}px system-ui`;
+    ctx.fillText("\u{1F45F}", screen.x - size * 0.18, screen.y + size * 0.44);
+    ctx.fillText("\u{1F45F}", screen.x + size * 0.18, screen.y + size * 0.44);
   }
 }
 
@@ -2179,13 +2240,50 @@ function drawPieces() {
     }
   }
 
-  for (const { birdKind, hex } of getBirdEntries(game.state)) {
+  const recentBirdEvents = getLastTurnBirdEvents(game.state);
+  for (const event of recentBirdEvents) {
+    const world = axialToPixel(event.hex, size);
+    const screen = worldToScreen(world.x, world.y);
+    if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+      continue;
+    }
+
+    const isKingDuck = event.birdKind === "kingDuck";
+    const isRemoval = event.action === "remove";
+    const stroke = isKingDuck ? "rgba(255, 179, 92, 0.9)" : "rgba(255, 215, 94, 0.9)";
+    ctx.save();
+    if (isRemoval) {
+      ctx.setLineDash([6, 4]);
+    }
+    drawHex(
+      screen.x,
+      screen.y,
+      size * (isRemoval ? 0.96 : 1.02),
+      "rgba(255, 255, 255, 0.03)",
+      stroke,
+      isRemoval ? 2.2 : 2.8
+    );
+    ctx.restore();
+
+    if (isRemoval) {
+      ctx.strokeStyle = "rgba(255, 179, 92, 0.88)";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(screen.x - size * 0.18, screen.y - size * 0.18);
+      ctx.lineTo(screen.x + size * 0.18, screen.y + size * 0.18);
+      ctx.moveTo(screen.x + size * 0.18, screen.y - size * 0.18);
+      ctx.lineTo(screen.x - size * 0.18, screen.y + size * 0.18);
+      ctx.stroke();
+    }
+  }
+
+  for (const { birdKind, source, hex } of getBirdEntries(game.state)) {
     const world = axialToPixel(hex, size);
     const screen = worldToScreen(world.x, world.y);
     if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
       continue;
     }
-    drawBirdPiece(birdKind, hex, size);
+    drawBirdPiece(birdKind, hex, size, source);
   }
 
   for (const { birdKind, hex } of getBirdEchoCopyEntries(game.state)) {

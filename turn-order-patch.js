@@ -88,9 +88,7 @@
   window.updateStatus = function () {
     originalUpdateStatus();
     if (game.state && !game.state.openingMoveDone) {
-      ui.subturnText.textContent = game.state.startingPlayer === 2
-        ? "Opening turn: 2 placements"
-        : "Opening move: 1 placement";
+      ui.subturnText.textContent = "Opening move: 1 placement";
     }
     updateTurnOrderSummary();
     window.updateClockUI();
@@ -110,7 +108,8 @@
     const startingPlayer = resolveStartingPlayer(game.turnOrder);
     game.state.startingPlayer = startingPlayer;
     game.state.turnPlayer = startingPlayer;
-    game.state.movesLeftInTurn = startingPlayer === 1 ? 1 : 2;
+    // Opening turn is always a single placement, regardless of who starts.
+    game.state.movesLeftInTurn = 1;
     ensureClockState(game.state);
     game.state.clock.activePlayer = startingPlayer;
     game.history = [];
@@ -126,6 +125,15 @@
   const input = document.getElementById("turnOrderInput");
   if (input) {
     input.value = game.turnOrder;
+  }
+  // Keep global identifier bindings in sync with patched implementations.
+  // This ensures existing listeners calling `newGame()`/`updateStatus()` use these patched versions.
+  try {
+    newGame = window.newGame;
+    updateStatus = window.updateStatus;
+    updateClockUI = window.updateClockUI;
+  } catch (error) {
+    // Non-fatal in environments where global bindings are not writable.
   }
   updateTurnOrderSummary();
   window.updateStatus();

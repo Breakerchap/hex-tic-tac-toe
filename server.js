@@ -153,19 +153,48 @@ const wss = new WebSocketServer({ noServer: true });
 
 const rooms = new Map();
 const clients = new Map();
+const ROOM_CODE_WORDS = [
+  "ACORN", "ADOBE", "AGATE", "ALBUM", "ALLOY", "AMBER", "ANGEL", "APPLE", "APRON", "ARBOR",
+  "ARROW", "ATLAS", "BACON", "BADGE", "BAGEL", "BASIL", "BEACH", "BEARD", "BERRY", "BIRCH",
+  "BLEND", "BLISS", "BLOOM", "BLUSH", "BOARD", "BOAST", "BOOTH", "BRAVE", "BREAD", "BRICK",
+  "BRINE", "BRISK", "BROOK", "BROWN", "BRUSH", "BUNNY", "CABLE", "CANDY", "CANOE", "CEDAR",
+  "CHARM", "CHESS", "CHILI", "CHIME", "CHORD", "CIVIC", "CLASS", "CLEAR", "CLOAK", "CLOUD",
+  "COACH", "COAST", "COBRA", "COMET", "CORAL", "CRANE", "CRISP", "CROWN", "CYCLE", "DAISY",
+  "DELTA", "DREAM", "DRIFT", "DUSKY", "EAGER", "EAGLE", "EARTH", "EBONY", "ELBOW", "ELDER",
+  "EMBER", "ENJOY", "ENTRY", "EPOCH", "EQUAL", "FAITH", "FANCY", "FIBER", "FIELD", "FIERY",
+  "FJORD", "FLAME", "FLASH", "FLEET", "FLINT", "FLORA", "FLOUR", "FOCUS", "FORGE", "FRESH",
+  "FROST", "FRUIT", "GHOST", "GIANT", "GLADE", "GLASS", "GLAZE", "GLOBE", "GLORY", "GNOME",
+  "GOOSE", "GRACE", "GRAIN", "GRASS", "GREAT", "GREEN", "GROVE", "GUIDE", "HABIT", "HAZEL",
+  "HEART", "HONEY", "HORSE", "HOUSE", "HUMOR", "HYPER", "IDEAL", "IMAGE", "IVORY", "JELLY",
+  "JOLLY", "JUDGE", "JUICE", "KNACK", "KNIFE", "KOALA", "LABEL", "LASER", "LATCH", "LATER",
+  "LAUGH", "LEMON", "LIGHT", "LILAC", "LIMIT", "LODGE", "LUNAR", "MAGIC", "MAJOR", "MANGO",
+  "MAPLE", "MARCH", "MATCH", "METAL", "MICRO", "MIGHT", "MINOR", "MINTY", "MODEL", "MONEY",
+  "MOOSE", "MOTOR", "MOUNT", "MOUSE", "MUSIC", "NAVAL", "NOBLE", "NORTH", "NOVEL", "NYLON",
+  "OASIS", "OCEAN", "OLIVE", "ONION", "OPERA", "ORBIT", "ORGAN", "OTTER", "PAINT", "PANEL",
+  "PAPER", "PARTY", "PEACH", "PEARL", "PEONY", "PHASE", "PHONE", "PIANO", "PIPER", "PIZZA",
+  "PLAIN", "PLANT", "PLATE", "POINT", "POLAR", "POWER", "PRIDE", "PRIME", "PRISM", "PRIZE",
+  "PROUD", "QUAIL", "QUEEN", "QUEST", "QUICK", "QUIET", "QUILL", "RADIO", "RAINY", "RANCH",
+  "RAPID", "RAVEN", "REACH", "REBEL", "RIDGE", "RIVER", "ROBIN", "ROCKY", "ROUGE", "ROUND",
+  "ROYAL", "RUGBY", "RULER", "RUSTY", "SABLE", "SALAD", "SCALE", "SCARF", "SCENE", "SCOUT",
+  "SCRUB", "SHAPE", "SHELL", "SHIFT", "SHINE", "SHORE", "SKATE", "SKILL", "SLATE", "SLEEP",
+  "SLOPE", "SMILE", "SMOKE", "SOLAR", "SOLID", "SOUND", "SOUTH", "SPACE", "SPARK", "SPELL",
+  "SPICE", "SPIRE", "SPORT", "SQUAD", "STACK", "STAGE", "STAMP", "STAND", "STARE", "STEEL",
+  "STONE", "STORM", "STORY", "STRIP", "SUGAR", "SUNNY", "SWIFT", "TABLE", "TALON", "TASTE",
+  "TEACH", "TEMPO", "THORN", "TIGER", "TIMER", "TOAST", "TODAY", "TOKEN", "TOWER", "TRACE",
+  "TRACK", "TRAIL", "TRAIN", "TREND", "TRIAL", "TRIBE", "TRICK", "TRUNK", "TRUST", "TULIP",
+  "TWEED", "ULTRA", "UNION", "UNITY", "URBAN", "VALUE", "VAPOR", "VENOM", "VERSE", "VIDEO",
+  "VIGOR", "VINYL", "VIRAL", "VISTA", "VIVID", "VOICE", "VOTER", "WAGON", "WATER", "WHALE",
+  "WHEAT", "WHITE", "WHOLE", "WIDEN", "WINDY", "WISER", "WITCH", "WORLD", "WORTH", "YACHT",
+  "YEAST", "YOUNG", "ZEBRA", "ZESTY"
+];
 
 function newClientId() {
   return crypto.randomBytes(4).toString("hex");
 }
 
 function newRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i += 1) {
-    const idx = crypto.randomInt(0, alphabet.length);
-    code += alphabet[idx];
-  }
-  return code;
+  const idx = crypto.randomInt(0, ROOM_CODE_WORDS.length);
+  return ROOM_CODE_WORDS[idx];
 }
 
 function send(ws, payload) {
@@ -309,9 +338,26 @@ function joinRoom(ws, roomCode) {
 function createRoom(ws) {
   leaveRoom(ws);
 
+  if (rooms.size >= ROOM_CODE_WORDS.length) {
+    send(ws, {
+      type: "error",
+      message: "No room codes available right now. Please try again in a moment."
+    });
+    return;
+  }
+
   let roomCode = newRoomCode();
+  let attempts = 0;
   while (rooms.has(roomCode)) {
     roomCode = newRoomCode();
+    attempts += 1;
+    if (attempts > ROOM_CODE_WORDS.length * 2) {
+      send(ws, {
+        type: "error",
+        message: "Could not allocate a room code. Please try again."
+      });
+      return;
+    }
   }
 
   rooms.set(roomCode, {
