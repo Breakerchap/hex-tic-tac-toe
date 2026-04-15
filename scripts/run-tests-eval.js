@@ -205,62 +205,10 @@ function runTimerTests(timer) {
   assert.equal(timer.formatClock(599), "09:59");
 }
 
-function runHalfAndHalfTests(half) {
-  assert.equal(half.SHARED_KIND, "halfAndHalf");
-  assert.equal(half.CAPTURE_STEP, 0.25);
-  assert.equal(half.isHalfAndHalfCell({ owner: 0, kind: "halfAndHalf" }), true);
-  assert.equal(half.isHalfAndHalfCell({ owner: 1, kind: "stone" }), false);
-
-  const p1Stone = { owner: 1, kind: "stone" };
-  const p2Stone = { owner: 2, kind: "stone" };
-  const shared = { owner: 0, kind: "halfAndHalf", capture: { 1: 0.5, 2: 0.5 } };
-
-  assert.equal(half.canPlaceOnCellInHalfMode(p2Stone, 1), true);
-  assert.equal(half.canPlaceOnCellInHalfMode(p1Stone, 1), false);
-  assert.equal(half.canPlaceOnCellInHalfMode(shared, 1), true);
-  assert.equal(half.canPlaceOnCellInHalfMode(shared, 2), true);
-
-  const firstCapture = half.resolveHalfAndHalfPlacement(p2Stone, 1);
-  assert.equal(
-    JSON.stringify(firstCapture),
-    JSON.stringify({ owner: 0, kind: "halfAndHalf", capture: { 1: 0.25, 2: 0.75 } })
-  );
-  assert.equal(half.cellCountsForOwner(firstCapture, 1), false);
-  assert.equal(half.cellCountsForOwner(firstCapture, 2), true);
-
-  const secondCapture = half.resolveHalfAndHalfPlacement(firstCapture, 1);
-  assert.equal(
-    JSON.stringify(secondCapture),
-    JSON.stringify({ owner: 0, kind: "halfAndHalf", capture: { 1: 0.5, 2: 0.5 } })
-  );
-  assert.equal(half.cellCountsForOwner(secondCapture, 1), true);
-  assert.equal(half.cellCountsForOwner(secondCapture, 2), true);
-
-  const fromSharedToP2 = half.resolveHalfAndHalfPlacement(shared, 2);
-  assert.equal(
-    JSON.stringify(fromSharedToP2),
-    JSON.stringify({ owner: 0, kind: "halfAndHalf", capture: { 1: 0.25, 2: 0.75 } })
-  );
-
-  const thirdCapture = half.resolveHalfAndHalfPlacement(secondCapture, 1);
-  const fullCapture = half.resolveHalfAndHalfPlacement(thirdCapture, 1);
-  assert.equal(
-    JSON.stringify(fullCapture),
-    JSON.stringify({ owner: 1, kind: "stone" })
-  );
-
-  assert.equal(half.cellCountsForOwner(shared, 1), true);
-  assert.equal(half.cellCountsForOwner(shared, 2), true);
-  assert.equal(half.cellCountsForOwner(p1Stone, 1), true);
-  assert.equal(half.cellCountsForOwner(p1Stone, 2), false);
-}
-
-const perf = loadUmdModule("hex_tictactoe_perf_helpers.js", "HexTicTacToePerf");
-const timer = loadUmdModule("hex_tictactoe_timer_helpers.js", "HexTicTacToeTimer");
-const half = loadUmdModule("hex_tictactoe_half_and_half_helpers.js", "HexTicTacToeHalf");
+const perf = loadUmdModule("perf-helpers.js", "HexTicTacToePerf");
+const timer = loadUmdModule("timer-helpers.js", "HexTicTacToeTimer");
 
 runPerfTests(perf);
 runTimerTests(timer);
-runHalfAndHalfTests(half);
 
 console.log("All helper tests passed.");

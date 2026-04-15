@@ -129,7 +129,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url === "/") {
-    sendFile(res, path.join(ROOT_DIR, "hex_tictactoe_absurd_modes.html"));
+    sendFile(res, path.join(ROOT_DIR, "index.html"));
     return;
   }
 

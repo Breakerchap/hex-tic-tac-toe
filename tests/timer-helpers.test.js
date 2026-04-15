@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const timer = require("../hex_tictactoe_timer_helpers.js");
+const timer = require("../timer-helpers.js");
 
 test("normaliseTimerConfig clamps and normalises values", () => {
   const config = timer.normaliseTimerConfig({

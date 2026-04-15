@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const perf = require("../hex_tictactoe_perf_helpers.js");
+const perf = require("../perf-helpers.js");
 
 const dirs = [
   { q: 1, r: 0 },

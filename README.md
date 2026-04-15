@@ -6,7 +6,7 @@ It includes stackable rule modes like `Duck`, `King Duck`, `Echo`, `Orbit`, and 
 ## Quick Start
 
 1. Clone this repository.
-2. For local play only, open [hex_tictactoe_absurd_modes.html](./hex_tictactoe_absurd_modes.html) in a modern browser.
+2. For local play only, open [index.html](./index.html) in a modern browser.
 3. For online rooms, run:
 
 ```bash
@@ -19,6 +19,8 @@ npm start
 No build step is required.
 
 ## Online Rooms
+
+Hosted version: https://hex-tic-tac-toe.onrender.com
 
 - Online rooms require the Node server (`server.js`) so WebSockets are available.
 - Turn control is server-authoritative: spectators cannot submit moves, and players can only update state on their own turn.
@@ -63,6 +65,7 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 ## Modes
 
 - **Duck**: move duck after your placements; no one can place on it.
+- **Duck Swarm**: after placements, place or remove one persistent neutral duck (or king duck if King Duck is active).
 - **King Duck**: adds a panic ring around the king duck.
 - **Echo**: mirrors placements/bird moves after two full turns.
 - **Orbit**: stones move one orbit step per full turn (birds stay put).
@@ -71,9 +74,9 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 ## Project Structure
 
 ```text
-hex_tictactoe_absurd_modes.html   # Markup shell
-hex_tictactoe_absurd_modes.css    # Styling and animated background
-hex_tictactoe_absurd_modes.js     # Game logic and rendering
+index.html                        # Markup shell
+styles.css                        # Styling and animated background
+game.js                           # Game logic and rendering
 ```
 
 ## GitHub Pages

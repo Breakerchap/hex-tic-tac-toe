@@ -2,7 +2,6 @@ const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 const perfHelpers = window.HexTicTacToePerf || {};
 const timerHelpers = window.HexTicTacToeTimer || {};
-const halfHelpers = window.HexTicTacToeHalf || {};
 
 const ui = {
   appRoot: document.getElementById("appRoot"),
@@ -84,65 +83,6 @@ const getRecentSerials = perfHelpers.getNewestTwoSerials || function legacyRecen
     .slice(0, 2);
 };
 
-const SHARED_TILE_KIND = halfHelpers.SHARED_KIND || "halfAndHalf";
-const HALF_CAPTURE_STEP = halfHelpers.CAPTURE_STEP || 0.25;
-const isHalfAndHalfCell = halfHelpers.isHalfAndHalfCell || function localIsHalfAndHalfCell(cell) {
-  return Boolean(cell && cell.kind === SHARED_TILE_KIND);
-};
-const getCellControl = halfHelpers.getCellControl || function localGetCellControl(cell) {
-  if (!cell) {
-    return { 1: 0, 2: 0 };
-  }
-  if (cell.kind === "stone") {
-    return {
-      1: cell.owner === 1 ? 1 : 0,
-      2: cell.owner === 2 ? 1 : 0
-    };
-  }
-  if (isHalfAndHalfCell(cell)) {
-    const p1 = typeof cell.capture?.[1] === "number" ? cell.capture[1] : 0.5;
-    return { 1: p1, 2: 1 - p1 };
-  }
-  return { 1: 0, 2: 0 };
-};
-const cellCountsForOwner = halfHelpers.cellCountsForOwner || function localCellCountsForOwner(cell, owner) {
-  return getCellControl(cell)[owner] >= 0.5;
-};
-const canPlaceOnCellInHalfMode = halfHelpers.canPlaceOnCellInHalfMode || function localCanPlaceOnCellInHalfMode(cell, placingOwner) {
-  if (!cell || (placingOwner !== 1 && placingOwner !== 2)) {
-    return false;
-  }
-  const other = placingOwner === 1 ? 2 : 1;
-  const control = getCellControl(cell);
-  return control[other] > 0 && control[placingOwner] < 1;
-};
-const resolveHalfAndHalfPlacement = halfHelpers.resolveHalfAndHalfPlacement || function localResolveHalfAndHalfPlacement(existingCell, placingOwner) {
-  if (placingOwner !== 1 && placingOwner !== 2) {
-    return null;
-  }
-  if (!existingCell) {
-    return { owner: placingOwner, kind: "stone" };
-  }
-  if (!canPlaceOnCellInHalfMode(existingCell, placingOwner)) {
-    return null;
-  }
-  const other = placingOwner === 1 ? 2 : 1;
-  const control = getCellControl(existingCell);
-  const steppedOwnerControl = Math.min(1, control[placingOwner] + HALF_CAPTURE_STEP);
-  const nextOwnerControl = Math.round(steppedOwnerControl / HALF_CAPTURE_STEP) * HALF_CAPTURE_STEP;
-  const nextOtherControl = Math.max(0, 1 - nextOwnerControl);
-  if (nextOwnerControl >= 1) {
-    return { owner: placingOwner, kind: "stone" };
-  }
-  return {
-    owner: 0,
-    kind: SHARED_TILE_KIND,
-    capture: {
-      [placingOwner]: nextOwnerControl,
-      [other]: nextOtherControl
-    }
-  };
-};
 
 const normaliseTimerConfig = timerHelpers.normaliseTimerConfig || function localNormaliseTimerConfig(config) {
   const safe = config || {};
@@ -219,6 +159,12 @@ const MODES = {
     hint: "The duck moves after your placement phase.",
     tags: ["Duck", "Blocker"]
   },
+  duckSwarm: {
+    name: "Duck Swarm",
+    summary: "After your placements, place or remove one neutral duck. Swarm ducks stack and stay until removed.",
+    hint: "Choose one hex each turn to add or remove a swarm duck.",
+    tags: ["Duck", "Swarm", "Persistent"]
+  },
   orbit: {
     name: "Orbit",
     summary: "At the end of every full turn, each stone moves 1 hex along its orbit ring. Ducks stay put.",
@@ -261,6 +207,8 @@ const lineAxes = [
 ];
 
 const BIRD_KINDS = ["duck", "kingDuck"];
+const BIRD_ACTION_MOVE = "moveBird";
+const BIRD_ACTION_SWARM = "toggleSwarmBird";
 
 function keyOf(q, r) {
   return `${q},${r}`;
@@ -463,15 +411,13 @@ function getModeConfig(modeKeys) {
 }
 
 function hasMode(state, modeKey) {
-  if (modeKey === "halfAndHalf") {
-    return false;
-  }
   return state.modeKeys.includes(modeKey);
 }
 
 function usesBirdMode(state) {
   return hasMode(state, "duck")
-    || hasMode(state, "kingDuck");
+    || hasMode(state, "kingDuck")
+    || hasMode(state, "duckSwarm");
 }
 
 function usesPanicBirdMode(state) {
@@ -479,7 +425,39 @@ function usesPanicBirdMode(state) {
 }
 
 function getBirdMoveKinds(state) {
-  return BIRD_KINDS.filter((birdKind) => hasMode(state, birdKind));
+  const movingKinds = BIRD_KINDS.filter((birdKind) => hasMode(state, birdKind));
+  if (hasMode(state, "duckSwarm")) {
+    return movingKinds.filter((birdKind) => birdKind !== "kingDuck");
+  }
+  return movingKinds;
+}
+
+function getSwarmBirdKind(state) {
+  return hasMode(state, "kingDuck") ? "kingDuck" : "duck";
+}
+
+function normaliseBirdAction(action) {
+  if (!action) {
+    return null;
+  }
+  if (typeof action === "string") {
+    return {
+      type: BIRD_ACTION_MOVE,
+      birdKind: action === "kingDuck" ? "kingDuck" : "duck"
+    };
+  }
+
+  const type = action.type === BIRD_ACTION_SWARM ? BIRD_ACTION_SWARM : BIRD_ACTION_MOVE;
+  const birdKind = action.birdKind === "kingDuck" ? "kingDuck" : "duck";
+  return { type, birdKind };
+}
+
+function getBirdPhaseActions(state) {
+  const actions = getBirdMoveKinds(state).map((birdKind) => ({ type: BIRD_ACTION_MOVE, birdKind }));
+  if (hasMode(state, "duckSwarm")) {
+    actions.push({ type: BIRD_ACTION_SWARM, birdKind: getSwarmBirdKind(state) });
+  }
+  return actions;
 }
 
 function getBirdMoveLabel(birdMoveKind = "duck") {
@@ -488,6 +466,17 @@ function getBirdMoveLabel(birdMoveKind = "duck") {
 
 function getBirdMoveTitle(birdMoveKind = "duck") {
   return birdMoveKind === "kingDuck" ? "King duck" : "Duck";
+}
+
+function getBirdActionPrompt(action) {
+  const safeAction = normaliseBirdAction(action);
+  if (!safeAction) {
+    return "";
+  }
+  if (safeAction.type === BIRD_ACTION_SWARM) {
+    return `Place or remove one ${getBirdMoveLabel(safeAction.birdKind)} anywhere`;
+  }
+  return `Move the ${getBirdMoveLabel(safeAction.birdKind)} to any empty hex`;
 }
 
 function getSelectedModeKeys() {
@@ -519,6 +508,10 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
     birds: {
       duck: null,
       kingDuck: null
+    },
+    swarmBirds: {
+      duck: {},
+      kingDuck: {}
     },
     birdEchoCopies: {
       duck: null,
@@ -1104,10 +1097,42 @@ function getBirdHex(state, birdKind) {
   return state.birds[birdKind] ? { ...state.birds[birdKind] } : null;
 }
 
+function ensureSwarmBirdState(state) {
+  if (!state.swarmBirds || typeof state.swarmBirds !== "object") {
+    state.swarmBirds = {
+      duck: {},
+      kingDuck: {}
+    };
+    return;
+  }
+
+  if (!state.swarmBirds.duck || typeof state.swarmBirds.duck !== "object") {
+    state.swarmBirds.duck = {};
+  }
+  if (!state.swarmBirds.kingDuck || typeof state.swarmBirds.kingDuck !== "object") {
+    state.swarmBirds.kingDuck = {};
+  }
+}
+
 function getBirdEntries(state) {
-  return BIRD_KINDS
-    .filter((birdKind) => state.birds[birdKind])
-    .map((birdKind) => ({ birdKind, hex: state.birds[birdKind] }));
+  ensureSwarmBirdState(state);
+  const entries = [];
+  for (const birdKind of BIRD_KINDS) {
+    const seen = new Set();
+    const movingBirdHex = state.birds[birdKind];
+    if (movingBirdHex) {
+      entries.push({ birdKind, source: "moving", hex: { ...movingBirdHex } });
+      seen.add(keyOf(movingBirdHex.q, movingBirdHex.r));
+    }
+
+    for (const swarmKey of Object.keys(state.swarmBirds[birdKind])) {
+      if (seen.has(swarmKey)) {
+        continue;
+      }
+      entries.push({ birdKind, source: "swarm", hex: parseKey(swarmKey) });
+    }
+  }
+  return entries;
 }
 
 function ensureBirdEchoCopyState(state) {
@@ -1119,7 +1144,7 @@ function ensureBirdEchoCopyState(state) {
   }
 }
 
-function getBirdAt(state, hex) {
+function getMovingBirdAt(state, hex) {
   for (const birdKind of BIRD_KINDS) {
     const birdHex = state.birds[birdKind];
     if (birdHex && equalHex(birdHex, hex)) {
@@ -1127,6 +1152,26 @@ function getBirdAt(state, hex) {
     }
   }
   return null;
+}
+
+function hasSwarmBirdByKindAt(state, hex, birdKind) {
+  ensureSwarmBirdState(state);
+  return Boolean(state.swarmBirds[birdKind][keyOf(hex.q, hex.r)]);
+}
+
+function getSwarmBirdAt(state, hex) {
+  ensureSwarmBirdState(state);
+  const k = keyOf(hex.q, hex.r);
+  for (const birdKind of BIRD_KINDS) {
+    if (state.swarmBirds[birdKind][k]) {
+      return birdKind;
+    }
+  }
+  return null;
+}
+
+function getBirdAt(state, hex) {
+  return getMovingBirdAt(state, hex) || getSwarmBirdAt(state, hex);
 }
 
 function getBirdEchoCopyAt(state, hex) {
@@ -1153,6 +1198,10 @@ function getCellAt(state, hex) {
   return state.cells[keyOf(hex.q, hex.r)] || null;
 }
 
+function cellCountsForOwner(cell, owner) {
+  return Boolean(cell && cell.kind === "stone" && cell.owner === owner);
+}
+
 function isStoneOccupied(state, hex) {
   return Boolean(getCellAt(state, hex));
 }
@@ -1162,12 +1211,61 @@ function isHexOpen(state, hex) {
 }
 
 function isHexOpenForBird(state, hex, birdKind) {
-  if (isStoneOccupied(state, hex)) return false;
-  const birdAt = getBirdAt(state, hex);
-  if (birdAt && birdAt !== birdKind) return false;
+  if (isStoneOccupied(state, hex)) {
+    return false;
+  }
+
+  const movingAt = getMovingBirdAt(state, hex);
+  const currentBirdHex = getBirdHex(state, birdKind);
+  const isCurrentBirdHex = Boolean(currentBirdHex && equalHex(currentBirdHex, hex));
+  if (movingAt && !isCurrentBirdHex) {
+    return false;
+  }
+
+  if (getSwarmBirdAt(state, hex)) {
+    return false;
+  }
+
   const copyAt = getBirdEchoCopyAt(state, hex);
-  if (copyAt && copyAt !== birdKind) return false;
+  if (copyAt && copyAt !== birdKind) {
+    return false;
+  }
   return true;
+}
+
+function canToggleSwarmBirdAt(state, hex, birdKind) {
+  if (hasSwarmBirdByKindAt(state, hex, birdKind)) {
+    return true;
+  }
+  if (isStoneOccupied(state, hex)) {
+    return false;
+  }
+  if (getMovingBirdAt(state, hex)) {
+    return false;
+  }
+  if (getSwarmBirdAt(state, hex)) {
+    return false;
+  }
+  if (getBirdEchoCopyAt(state, hex)) {
+    return false;
+  }
+  return true;
+}
+
+function toggleSwarmBird(state, hex, birdKind) {
+  if (!canToggleSwarmBirdAt(state, hex, birdKind)) {
+    return null;
+  }
+  ensureSwarmBirdState(state);
+  const k = keyOf(hex.q, hex.r);
+  if (state.swarmBirds[birdKind][k]) {
+    delete state.swarmBirds[birdKind][k];
+    rebuildPanicZones(state);
+    return { action: "remove", birdKind };
+  }
+  state.swarmBirds[birdKind][k] = true;
+  rebuildPanicZones(state);
+  return { action: "place", birdKind };
 }
 
 function getPlacementAnchorHexes(state) {
@@ -1180,18 +1278,23 @@ function getPlacementAnchorHexes(state) {
 
 function rebuildPanicZones(state) {
   ensureBirdEchoCopyState(state);
+  ensureSwarmBirdState(state);
   state.panicZones = {};
-  const panicSources = [];
-  const kingDuckHex = getBirdHex(state, "kingDuck");
-  if (kingDuckHex) {
-    panicSources.push(kingDuckHex);
-  }
-  const kingDuckEchoCopy = state.birdEchoCopies?.kingDuck;
-  if (hasMode(state, "echo") && kingDuckEchoCopy) {
-    panicSources.push(kingDuckEchoCopy);
+  const panicSourcesByKey = {};
+
+  for (const entry of getBirdEntries(state)) {
+    if (entry.birdKind !== "kingDuck") {
+      continue;
+    }
+    panicSourcesByKey[keyOf(entry.hex.q, entry.hex.r)] = entry.hex;
   }
 
-  for (const source of panicSources) {
+  const kingDuckEchoCopy = state.birdEchoCopies?.kingDuck;
+  if (hasMode(state, "echo") && kingDuckEchoCopy) {
+    panicSourcesByKey[keyOf(kingDuckEchoCopy.q, kingDuckEchoCopy.r)] = kingDuckEchoCopy;
+  }
+
+  for (const source of Object.values(panicSourcesByKey)) {
     for (const n of neighbours(source)) {
       if (!isOccupied(state, n)) {
         state.panicZones[keyOf(n.q, n.r)] = true;
@@ -1226,13 +1329,6 @@ function isWithinPlacementRange(state, hex) {
   return anchorHexes.some((anchorHex) => hexDistance(anchorHex, hex) <= MAX_PLACEMENT_DISTANCE);
 }
 
-function canPlaceOnOccupiedHex(state, hex, owner = state.turnPlayer) {
-  if (!hasMode(state, "halfAndHalf")) {
-    return false;
-  }
-  return canPlaceOnCellInHalfMode(getCellAt(state, hex), owner);
-}
-
 function isLegalByBaseRules(state, hex, options = {}) {
   const allowOccupied = Boolean(options.allowOccupied);
   if (state.winner) {
@@ -1251,13 +1347,12 @@ function isLegalByBaseRules(state, hex, options = {}) {
 }
 
 function isLegalPlacement(state, hex) {
-  const allowOccupied = canPlaceOnOccupiedHex(state, hex, state.turnPlayer);
-  if (!isLegalByBaseRules(state, hex, { allowOccupied })) {
+  if (!isLegalByBaseRules(state, hex, { allowOccupied: false })) {
     return false;
   }
 
   const occupiedByStone = isStoneOccupied(state, hex);
-  if (occupiedByStone && !allowOccupied) {
+  if (occupiedByStone) {
     return false;
   }
   return true;
@@ -1453,14 +1548,14 @@ function getMeteorTargets(state) {
     }
   }
 
-  for (const { birdKind, hex } of getBirdEntries(state)) {
+  for (const { birdKind, source, hex } of getBirdEntries(state)) {
     const dist = hexDistance(hex);
     if (dist > farthestDistance) {
       farthestDistance = dist;
       farthest.length = 0;
-      farthest.push({ type: "bird", birdKind, pos: { ...hex } });
+      farthest.push({ type: "bird", birdKind, source, pos: { ...hex } });
     } else if (dist === farthestDistance) {
-      farthest.push({ type: "bird", birdKind, pos: { ...hex } });
+      farthest.push({ type: "bird", birdKind, source, pos: { ...hex } });
     }
   }
 
@@ -1472,6 +1567,7 @@ function getMeteorTargets(state) {
 
 function resolveMeteorAccounting(state) {
   ensureBirdEchoCopyState(state);
+  ensureSwarmBirdState(state);
   if (!hasMode(state, "meteorAccounting")) {
     return;
   }
@@ -1488,8 +1584,12 @@ function resolveMeteorAccounting(state) {
 
   for (const entry of farthest) {
     if (entry.type === "bird") {
-      state.birds[entry.birdKind] = null;
-      state.birdEchoCopies[entry.birdKind] = null;
+      if (entry.source === "swarm") {
+        delete state.swarmBirds[entry.birdKind][keyOf(entry.pos.q, entry.pos.r)];
+      } else {
+        state.birds[entry.birdKind] = null;
+        state.birdEchoCopies[entry.birdKind] = null;
+      }
     } else {
       removeStone(state, entry.pos);
     }
@@ -1497,7 +1597,7 @@ function resolveMeteorAccounting(state) {
   rebuildPanicZones(state);
   const coords = farthest.map((entry) => (
     entry.type === "bird"
-      ? `${getBirdMoveTitle(entry.birdKind)} at (${entry.pos.q}, ${entry.pos.r})`
+      ? `${getBirdMoveTitle(entry.birdKind)}${entry.source === "swarm" ? " swarm" : ""} at (${entry.pos.q}, ${entry.pos.r})`
       : `stone at (${entry.pos.q}, ${entry.pos.r})`
   )).join(", ");
   const line = `Meteor removed ${farthest.length} tile${farthest.length === 1 ? "" : "s"} at distance ${farthestDistance}: ${coords}.`;
@@ -1548,7 +1648,7 @@ function finishSubmove(state) {
   }
 
   if (usesBirdMode(state) && state.movesLeftInTurn <= 0 && state.lastPlacedThisTurn.length >= 1) {
-    const birdMoves = getBirdMoveKinds(state);
+    const birdMoves = getBirdPhaseActions(state);
     if (birdMoves.length > 0) {
       state.duckPhase = true;
       state.currentBirdMoveKind = birdMoves[0];
@@ -1563,47 +1663,13 @@ function finishSubmove(state) {
   }
 }
 
-function placeResolvedTile(state, hex, owner, kind, capture = null) {
-  state.moveSerial += 1;
-  const nextCell = {
-    owner,
-    kind,
-    serial: state.moveSerial
-  };
-  if (kind === SHARED_TILE_KIND && capture) {
-    nextCell.capture = {
-      1: capture[1],
-      2: capture[2]
-    };
-  }
-  state.cells[keyOf(hex.q, hex.r)] = nextCell;
-  state.lastPlacement = { ...hex };
-  state.lastPlacedByPlayer[state.turnPlayer] = { ...hex };
-  state.lastPlacedThisTurn.push({ ...hex });
-}
-
 function placeTurnTile(state, hex, owner) {
   const existingCell = getCellAt(state, hex);
-  const canUseHalfMode = hasMode(state, "halfAndHalf");
-  const resolvedCell = canUseHalfMode
-    ? resolveHalfAndHalfPlacement(existingCell, owner)
-    : (existingCell ? null : { owner, kind: "stone" });
-
-  if (!resolvedCell) {
+  if (existingCell) {
     return null;
   }
 
-  if (resolvedCell.kind === "stone") {
-    placeStone(state, hex, resolvedCell.owner, "stone");
-  } else {
-    placeResolvedTile(
-      state,
-      hex,
-      resolvedCell.owner,
-      resolvedCell.kind,
-      resolvedCell.capture
-    );
-  }
+  placeStone(state, hex, owner, "stone");
 
   queueEcho(state, {
     kind: "stone",
@@ -1611,16 +1677,6 @@ function placeTurnTile(state, hex, owner) {
     source: state.lastPlacement
   });
 
-  if (!existingCell) {
-    return `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`;
-  }
-  if (isHalfAndHalfCell(existingCell) && resolvedCell.kind === "stone") {
-    return `Player ${owner} fully captured shared tile at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`;
-  }
-  if (resolvedCell.kind === SHARED_TILE_KIND) {
-    const control = getCellControl(resolvedCell);
-    return `Player ${owner} captured to ${Math.round(control[owner] * 100)}% at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`;
-  }
   return `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`;
 }
 
@@ -1636,15 +1692,30 @@ function clickPlacement(hex) {
   }
 
   if (state.duckPhase) {
-    const birdMoveKind = state.currentBirdMoveKind || "duck";
-    const currentBirdHex = getBirdHex(state, birdMoveKind);
-    if ((currentBirdHex && equalHex(currentBirdHex, hex)) || !isHexOpenForBird(state, hex, birdMoveKind)) {
-      return;
+    const birdAction = normaliseBirdAction(state.currentBirdMoveKind) || { type: BIRD_ACTION_MOVE, birdKind: "duck" };
+    if (birdAction.type === BIRD_ACTION_MOVE) {
+      const currentBirdHex = getBirdHex(state, birdAction.birdKind);
+      if ((currentBirdHex && equalHex(currentBirdHex, hex)) || !isHexOpenForBird(state, hex, birdAction.birdKind)) {
+        return;
+      }
+      saveHistory();
+      moveBird(state, hex, birdAction.birdKind);
+      syncBirdEchoCopy(state, birdAction.birdKind);
+      pushLog(`${getBirdMoveTitle(birdAction.birdKind)} moved to (${hex.q}, ${hex.r}).`);
+    } else {
+      const swarmKind = birdAction.birdKind;
+      if (!canToggleSwarmBirdAt(state, hex, swarmKind)) {
+        return;
+      }
+      saveHistory();
+      const swarmAction = toggleSwarmBird(state, hex, swarmKind);
+      if (!swarmAction) {
+        return;
+      }
+      const verb = swarmAction.action === "remove" ? "removed from" : "placed at";
+      pushLog(`${getBirdMoveTitle(swarmKind)} swarm ${verb} (${hex.q}, ${hex.r}).`);
     }
-    saveHistory();
-    moveBird(state, hex, birdMoveKind);
-    syncBirdEchoCopy(state, birdMoveKind);
-    pushLog(`${getBirdMoveTitle(birdMoveKind)} moved to (${hex.q}, ${hex.r}).`);
+
     if (state.birdMovesPending.length > 0) {
       state.currentBirdMoveKind = state.birdMovesPending.shift();
       state.movesLeftInTurn = 1 + state.birdMovesPending.length;
@@ -1704,7 +1775,7 @@ function updateStatus() {
   if (!state.openingMoveDone) {
     ui.subturnText.textContent = "Opening move: 1 placement";
   } else if (state.duckPhase) {
-    ui.subturnText.textContent = `Move the ${getBirdMoveLabel(state.currentBirdMoveKind)} to any empty hex`;
+    ui.subturnText.textContent = getBirdActionPrompt(state.currentBirdMoveKind);
   } else {
     ui.subturnText.textContent = `${state.movesLeftInTurn} placement${state.movesLeftInTurn === 1 ? "" : "s"} left this turn`;
   }
@@ -2029,6 +2100,10 @@ function drawBirdEchoCopy(birdKind, copyHex, size) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("\u{1F986}", screen.x, screen.y + 1);
+  if (isKingDuck) {
+    ctx.font = `${Math.max(11, size * 0.5)}px system-ui`;
+    ctx.fillText("\u{1F451}", screen.x, screen.y - size * 0.48);
+  }
   ctx.restore();
 }
 
@@ -2051,15 +2126,8 @@ function drawBirdPiece(birdKind, birdHex, size) {
   ctx.fillText("\u{1F986}", screen.x, screen.y + 1);
 
   if (isKingDuck) {
-    ctx.strokeStyle = "rgba(255, 245, 188, 0.9)";
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.moveTo(screen.x - size * 0.24, screen.y - size * 0.32);
-    ctx.lineTo(screen.x - size * 0.1, screen.y - size * 0.5);
-    ctx.lineTo(screen.x, screen.y - size * 0.34);
-    ctx.lineTo(screen.x + size * 0.1, screen.y - size * 0.5);
-    ctx.lineTo(screen.x + size * 0.24, screen.y - size * 0.32);
-    ctx.stroke();
+    ctx.font = `${Math.max(11, size * 0.5)}px system-ui`;
+    ctx.fillText("\u{1F451}", screen.x, screen.y - size * 0.48);
   }
 }
 
@@ -2084,9 +2152,7 @@ function drawPieces() {
     const colour = cell.owner === 1 ? "#6dc6ff" : "#ff8c8c";
     if (!lowDetail && recentSerialSet.has(cell.serial)) {
       const isNewest = cell.serial === newestSerial;
-      const recentStroke = isHalfAndHalfCell(cell)
-        ? "rgba(255, 255, 255, 0.85)"
-        : (cell.owner === 1 ? "rgba(109, 198, 255, 0.9)" : "rgba(255, 140, 140, 0.9)");
+      const recentStroke = cell.owner === 1 ? "rgba(109, 198, 255, 0.9)" : "rgba(255, 140, 140, 0.9)";
       drawHex(
         screen.x,
         screen.y,
@@ -2097,52 +2163,14 @@ function drawPieces() {
       );
     }
 
-    if (isHalfAndHalfCell(cell) && !lowDetail) {
-      const control = getCellControl(cell);
-      const splitAt = Math.min(0.98, Math.max(0.02, control[1]));
-      const blend = ctx.createLinearGradient(
-        screen.x - size * 0.72,
-        screen.y,
-        screen.x + size * 0.72,
-        screen.y
-      );
-      blend.addColorStop(0, "#6dc6ff");
-      blend.addColorStop(splitAt, "#6dc6ff");
-      blend.addColorStop(splitAt, "#ff8c8c");
-      blend.addColorStop(1, "#ff8c8c");
-      drawHex(screen.x, screen.y, size * 0.78, blend, "rgba(255,255,255,0.6)", 1.7);
-      const dividerX = (screen.x - size * 0.72) + (size * 1.44 * splitAt);
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-      ctx.lineWidth = Math.max(1.2, size * 0.06);
-      ctx.beginPath();
-      ctx.moveTo(dividerX, screen.y - size * 0.6);
-      ctx.lineTo(dividerX, screen.y + size * 0.6);
-      ctx.stroke();
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-      ctx.font = `${Math.max(9, size * 0.28)}px system-ui`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(
-        `${Math.round(control[1] * 100)}/${Math.round(control[2] * 100)}`,
-        screen.x,
-        screen.y - size * 0.84
-      );
-    } else {
-      let fillColour = colour;
-      if (isHalfAndHalfCell(cell)) {
-        const control = getCellControl(cell);
-        fillColour = control[1] >= control[2] ? "#6dc6ff" : "#ff8c8c";
-      }
-      drawHex(
-        screen.x,
-        screen.y,
-        size * 0.78,
-        fillColour,
-        lowDetail ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.45)",
-        lowDetail ? 1 : 1.5
-      );
-    }
+    drawHex(
+      screen.x,
+      screen.y,
+      size * 0.78,
+      colour,
+      lowDetail ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.45)",
+      lowDetail ? 1 : 1.5
+    );
     if (!veryLowDetail) {
       ctx.fillStyle = "rgba(6, 12, 23, 0.52)";
       ctx.beginPath();
