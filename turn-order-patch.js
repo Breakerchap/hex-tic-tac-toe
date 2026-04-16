@@ -54,6 +54,27 @@
     }
   }
 
+  function normaliseEgyptianCap(value) {
+    const parsed = Math.round(Number(value));
+    if (!Number.isFinite(parsed)) {
+      return 12;
+    }
+    return Math.max(1, Math.min(120, parsed));
+  }
+
+  function syncEgyptianCapFromInput() {
+    const capInput = document.getElementById("egyptianCapInput");
+    const capSummary = document.getElementById("egyptianCapSummaryText");
+    const cap = normaliseEgyptianCap(capInput?.value);
+    game.egyptianStoneCap = cap;
+    if (capInput) {
+      capInput.value = String(cap);
+    }
+    if (capSummary) {
+      capSummary.textContent = `Cap: ${cap} stones/player`;
+    }
+  }
+
   window.updateClockUI = function () {
     originalUpdateClockUI();
     const boardClockP1 = document.getElementById("boardClockP1");
@@ -97,6 +118,7 @@
   window.newGame = function (modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfig, turnOrder = (document.getElementById("turnOrderInput")?.value || game.turnOrder || "p1First")) {
     game.timerConfig = normaliseTimerConfig(timerConfig);
     game.turnOrder = normaliseTurnOrder(turnOrder);
+    syncEgyptianCapFromInput();
     setTimerInputs(game.timerConfig);
     const input = document.getElementById("turnOrderInput");
     if (input) {
@@ -104,7 +126,7 @@
     }
     updateTurnOrderSummary();
 
-    game.state = makeInitialState(modeKeys, game.timerConfig);
+    game.state = makeInitialState(modeKeys, game.timerConfig, game.egyptianStoneCap);
     const startingPlayer = resolveStartingPlayer(game.turnOrder);
     game.state.startingPlayer = startingPlayer;
     game.state.turnPlayer = startingPlayer;
@@ -126,6 +148,7 @@
   if (input) {
     input.value = game.turnOrder;
   }
+  syncEgyptianCapFromInput();
   // Keep global identifier bindings in sync with patched implementations.
   // This ensures existing listeners calling `newGame()`/`updateStatus()` use these patched versions.
   try {

@@ -1,7 +1,7 @@
 # Infinite Hex Tic-Tac-Toe
 
 A browser-based infinite hex-grid strategy game where players race to connect **6 in a row**.  
-It includes stackable rule modes like `Duck`, `King Duck`, `Echo`, `Orbit`, and `Meteor`.
+It includes stackable rule modes like `Duck`, `King Duck`, `Egyptian`, `Greek`, `Echo`, `Orbit`, and `Meteor`.
 
 ## Quick Start
 
@@ -65,8 +65,9 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 ## Modes
 
 - **Duck**: move duck after your placements; no one can place on it.
-- **Duck Swarm**: after placements, place or remove one persistent neutral duck (or king duck if King Duck is active).
 - **King Duck**: adds a panic ring around the king duck.
+- **Egyptian**: each player can keep at most `n` stones (set `n` in the UI); placing beyond `n` removes your oldest stones first.
+- **Greek**: uses the same `n` cap, but when you go over cap you choose which of your stones to remove.
 - **Echo**: mirrors placements/bird moves after two full turns.
 - **Orbit**: stones move one orbit step per full turn (birds stay put).
 - **Meteor**: every 3 full turns, farthest occupied hexes are removed.

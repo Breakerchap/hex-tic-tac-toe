@@ -296,21 +296,6 @@ button.primary {
   color: var(--text);
 }
 
-.pillRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pill {
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  font-size: 0.82rem;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.04);
-}
-
 .turnBig {
   font-size: 1.45rem;
   font-weight: 700;

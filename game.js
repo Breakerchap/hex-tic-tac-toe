@@ -17,7 +17,8 @@ const ui = {
   winnerText: document.getElementById("winnerText"),
   modeName: document.getElementById("modeName"),
   modeSummary: document.getElementById("modeSummary"),
-  modePills: document.getElementById("modePills"),
+  egyptianCapInput: document.getElementById("egyptianCapInput"),
+  egyptianCapSummaryText: document.getElementById("egyptianCapSummaryText"),
   log: document.getElementById("log"),
   overlayTitle: document.getElementById("overlayTitle"),
   overlayHint: document.getElementById("overlayHint"),
@@ -53,6 +54,7 @@ const DEFAULT_TIMER_CONFIG = {
   initialMinutes: 5,
   incrementSeconds: 2
 };
+const DEFAULT_EGYPTIAN_STONE_CAP = 12;
 const HEX_VERTEX_UNIT = Array.from({ length: 6 }, (_, i) => {
   const angle = Math.PI / 180 * (60 * i - 30);
   return {
@@ -148,46 +150,44 @@ const switchClockTurn = timerHelpers.switchTurnWithIncrement || function localSw
 const BASE_MODE = {
   name: "Classic",
   summary: "Standard rules with the origin start and the 8-hex placement limit.",
-  hint: "No special mode active.",
-  tags: ["Standard"]
+  hint: "Classic mode: make a line of 6. No extra effects are active."
 };
 
 const MODES = {
   duck: {
     name: "Duck",
     summary: "After your placements, move the duck to any empty hex. Nobody can place on the duck.",
-    hint: "The duck moves after your placement phase.",
-    tags: ["Duck", "Blocker"]
+    hint: "After placing, move the duck to an empty hex to block that hex."
   },
-  duckSwarm: {
-    name: "Duck Swarm",
-    summary: "After your placements, place or remove one neutral duck. Swarm ducks stack and stay until removed.",
-    hint: "Choose one hex each turn to add or remove a swarm duck.",
-    tags: ["Duck", "Swarm", "Persistent"]
+  egyptian: {
+    name: "Egyptian",
+    summary: "Each player may keep at most n stones. After placing beyond n, that player's oldest stones are removed.",
+    hint: "Set n in the sidebar. If you go over n stones, your oldest stones are removed (preview rings show what expires next)."
+  },
+  greek: {
+    name: "Greek",
+    summary: "Like Egyptian cap mode, but when you exceed n you choose which of your stones to remove.",
+    hint: "Set n in the sidebar. When you exceed n, click one of your own stones to remove."
   },
   orbit: {
     name: "Orbit",
     summary: "At the end of every full turn, each stone moves 1 hex along its orbit ring. Ducks stay put.",
-    hint: "Faint lines show the next orbit step for stones only.",
-    tags: ["Rotation", "Dynamic"]
+    hint: "After each full turn, stones shift one step around their ring (ducks stay put). Faint lines show the next shift."
   },
   echo: {
     name: "Echo",
     summary: "Each stone placement schedules an echo two full turns later at the mirrored coordinate across the origin, if that hex is open. Ducks also project a mirrored copy immediately.",
-    hint: "Stone echoes are shown as faint outlines. Bird copies mirror instantly and vanish when that bird moves again.",
-    tags: ["Delayed copy", "Mirror"]
+    hint: "Stone echoes appear two full turns later at the mirrored hex if it is open. Bird mirror copies appear immediately and clear on that bird's next move."
   },
   kingDuck: {
     name: "King Duck",
     summary: "Duck rules apply, but after the duck moves, adjacent empty hexes become panic zones until the next bird move.",
-    hint: "The duck leaves a panic ring behind it after it moves.",
-    tags: ["Duck", "Panic"]
+    hint: "After the king duck moves, adjacent empty hexes become panic zones until the next bird move."
   },
   meteorAccounting: {
     name: "Meteor",
     summary: "Every 3 full turns, all occupied hexes tied for farthest distance from the origin are deleted.",
-    hint: "The outer edge gets cleared every 3 rounds.",
-    tags: ["Meteor", "Cleanup"]
+    hint: "Every 3 full turns, all occupied hexes farthest from the center are deleted."
   }
 };
 
@@ -208,7 +208,6 @@ const lineAxes = [
 
 const BIRD_KINDS = ["duck", "kingDuck"];
 const BIRD_ACTION_MOVE = "moveBird";
-const BIRD_ACTION_SWARM = "toggleSwarmBird";
 
 function keyOf(q, r) {
   return `${q},${r}`;
@@ -347,6 +346,7 @@ const game = {
   previewModeKeys: [],
   modeUiSignature: "",
   renderScheduled: false,
+  egyptianStoneCap: DEFAULT_EGYPTIAN_STONE_CAP,
   timerConfig: normaliseTimerConfig(DEFAULT_TIMER_CONFIG),
   clockRuntime: {
     intervalId: null,
@@ -405,8 +405,7 @@ function getModeConfig(modeKeys) {
       : activeModes.map((mode) => `${mode.name}: ${mode.summary}`).join(" "),
     hint: activeModes.length === 1
       ? activeModes[0].hint
-      : activeModes.map((mode) => mode.hint).join(" "),
-    tags: [...new Set(activeModes.flatMap((mode) => mode.tags))]
+      : activeModes.map((mode) => `${mode.name}: ${mode.hint}`).join(" | ")
   };
 }
 
@@ -416,8 +415,7 @@ function hasMode(state, modeKey) {
 
 function usesBirdMode(state) {
   return hasMode(state, "duck")
-    || hasMode(state, "kingDuck")
-    || hasMode(state, "duckSwarm");
+    || hasMode(state, "kingDuck");
 }
 
 function usesPanicBirdMode(state) {
@@ -425,15 +423,7 @@ function usesPanicBirdMode(state) {
 }
 
 function getBirdMoveKinds(state) {
-  const movingKinds = BIRD_KINDS.filter((birdKind) => hasMode(state, birdKind));
-  if (hasMode(state, "duckSwarm")) {
-    return movingKinds.filter((birdKind) => birdKind !== "kingDuck");
-  }
-  return movingKinds;
-}
-
-function getSwarmBirdKind(state) {
-  return hasMode(state, "kingDuck") ? "kingDuck" : "duck";
+  return BIRD_KINDS.filter((birdKind) => hasMode(state, birdKind));
 }
 
 function normaliseBirdAction(action) {
@@ -447,17 +437,12 @@ function normaliseBirdAction(action) {
     };
   }
 
-  const type = action.type === BIRD_ACTION_SWARM ? BIRD_ACTION_SWARM : BIRD_ACTION_MOVE;
   const birdKind = action.birdKind === "kingDuck" ? "kingDuck" : "duck";
-  return { type, birdKind };
+  return { type: BIRD_ACTION_MOVE, birdKind };
 }
 
 function getBirdPhaseActions(state) {
-  const actions = getBirdMoveKinds(state).map((birdKind) => ({ type: BIRD_ACTION_MOVE, birdKind }));
-  if (hasMode(state, "duckSwarm")) {
-    actions.push({ type: BIRD_ACTION_SWARM, birdKind: getSwarmBirdKind(state) });
-  }
-  return actions;
+  return getBirdMoveKinds(state).map((birdKind) => ({ type: BIRD_ACTION_MOVE, birdKind }));
 }
 
 function getBirdMoveLabel(birdMoveKind = "duck") {
@@ -472,9 +457,6 @@ function getBirdActionPrompt(action) {
   const safeAction = normaliseBirdAction(action);
   if (!safeAction) {
     return "";
-  }
-  if (safeAction.type === BIRD_ACTION_SWARM) {
-    return `Place or remove one ${getBirdMoveLabel(safeAction.birdKind)} anywhere`;
   }
   return `Move the ${getBirdMoveLabel(safeAction.birdKind)} to any empty hex`;
 }
@@ -494,10 +476,11 @@ function setSelectedModeKeys(modeKeys) {
   setModeUI(game.previewModeKeys);
 }
 
-function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
+function makeInitialState(modeKeys, timerConfig = game.timerConfig, egyptianStoneCap = game.egyptianStoneCap) {
   const activeModeKeys = normaliseModeKeys(modeKeys);
   return {
     modeKeys: activeModeKeys,
+    egyptianStoneCap: normaliseEgyptianStoneCap(egyptianStoneCap),
     cells: {},
     turnPlayer: 1,
     movesLeftInTurn: 1,
@@ -509,10 +492,6 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
       duck: null,
       kingDuck: null
     },
-    swarmBirds: {
-      duck: {},
-      kingDuck: {}
-    },
     birdEchoCopies: {
       duck: null,
       kingDuck: null
@@ -522,9 +501,11 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig) {
     currentBirdMoveKind: null,
     panicZones: {},
     pendingEchoes: [],
+    greekRemoval: null,
     lastPlacedThisTurn: [],
     lastPlacement: null,
     recentBirdEvents: [],
+    recentCapRemovalEvents: [],
     lastPlacedByPlayer: { 1: null, 2: null },
     moveSerial: 0,
     log: ["Game started."],
@@ -540,13 +521,6 @@ function setModeUI(modeKeys) {
   ui.modeSummary.textContent = mode.summary;
   ui.overlayTitle.textContent = mode.name;
   ui.overlayHint.textContent = mode.hint;
-  ui.modePills.innerHTML = "";
-  mode.tags.forEach((tag) => {
-    const pill = document.createElement("div");
-    pill.className = "pill";
-    pill.textContent = tag;
-    ui.modePills.appendChild(pill);
-  });
 }
 
 function setOptionsMenuCollapsed(collapsed) {
@@ -590,6 +564,28 @@ function setTimerInputs(timerConfig) {
   ui.timerSummaryText.textContent = timerConfig.enabled
     ? `${timerConfig.initialMinutes}m +${timerConfig.incrementSeconds}s`
     : "Disabled";
+}
+
+function normaliseEgyptianStoneCap(value) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_EGYPTIAN_STONE_CAP;
+  }
+  return Math.max(1, Math.min(120, parsed));
+}
+
+function getEgyptianStoneCapFromInputs() {
+  return normaliseEgyptianStoneCap(ui.egyptianCapInput?.value);
+}
+
+function setEgyptianCapInput(value) {
+  const cap = normaliseEgyptianStoneCap(value);
+  if (ui.egyptianCapInput) {
+    ui.egyptianCapInput.value = String(cap);
+  }
+  if (ui.egyptianCapSummaryText) {
+    ui.egyptianCapSummaryText.textContent = `Cap: ${cap} stones/player`;
+  }
 }
 
 function ensureClockState(state) {
@@ -728,6 +724,9 @@ function updateOnlineControls() {
   ui.timerMinutesInput.disabled = inRoom && !admin;
   ui.timerIncrementInput.disabled = inRoom && !admin;
   ui.timerEnabledInput.disabled = inRoom && !admin;
+  if (ui.egyptianCapInput) {
+    ui.egyptianCapInput.disabled = inRoom && !admin;
+  }
   for (const button of ui.modePicker.querySelectorAll(".modeToggle")) {
     button.disabled = inRoom && !admin;
   }
@@ -932,7 +931,9 @@ function applyRemoteState(state, revision) {
     initialMinutes: Math.round(game.state.clock.initialSeconds / 60),
     incrementSeconds: game.state.clock.incrementSeconds
   });
+  game.egyptianStoneCap = normaliseEgyptianStoneCap(game.state.egyptianStoneCap);
   setTimerInputs(game.timerConfig);
+  setEgyptianCapInput(game.egyptianStoneCap);
   setSelectedModeKeys(game.state.modeKeys);
   updateStatus();
   syncClockTickerFromState();
@@ -1098,42 +1099,10 @@ function getBirdHex(state, birdKind) {
   return state.birds[birdKind] ? { ...state.birds[birdKind] } : null;
 }
 
-function ensureSwarmBirdState(state) {
-  if (!state.swarmBirds || typeof state.swarmBirds !== "object") {
-    state.swarmBirds = {
-      duck: {},
-      kingDuck: {}
-    };
-    return;
-  }
-
-  if (!state.swarmBirds.duck || typeof state.swarmBirds.duck !== "object") {
-    state.swarmBirds.duck = {};
-  }
-  if (!state.swarmBirds.kingDuck || typeof state.swarmBirds.kingDuck !== "object") {
-    state.swarmBirds.kingDuck = {};
-  }
-}
-
 function getBirdEntries(state) {
-  ensureSwarmBirdState(state);
-  const entries = [];
-  for (const birdKind of BIRD_KINDS) {
-    const seen = new Set();
-    const movingBirdHex = state.birds[birdKind];
-    if (movingBirdHex) {
-      entries.push({ birdKind, source: "moving", hex: { ...movingBirdHex } });
-      seen.add(keyOf(movingBirdHex.q, movingBirdHex.r));
-    }
-
-    for (const swarmKey of Object.keys(state.swarmBirds[birdKind])) {
-      if (seen.has(swarmKey)) {
-        continue;
-      }
-      entries.push({ birdKind, source: "swarm", hex: parseKey(swarmKey) });
-    }
-  }
-  return entries;
+  return BIRD_KINDS
+    .filter((birdKind) => state.birds[birdKind])
+    .map((birdKind) => ({ birdKind, hex: state.birds[birdKind] }));
 }
 
 function ensureBirdEchoCopyState(state) {
@@ -1145,7 +1114,7 @@ function ensureBirdEchoCopyState(state) {
   }
 }
 
-function getMovingBirdAt(state, hex) {
+function getBirdAt(state, hex) {
   for (const birdKind of BIRD_KINDS) {
     const birdHex = state.birds[birdKind];
     if (birdHex && equalHex(birdHex, hex)) {
@@ -1153,26 +1122,6 @@ function getMovingBirdAt(state, hex) {
     }
   }
   return null;
-}
-
-function hasSwarmBirdByKindAt(state, hex, birdKind) {
-  ensureSwarmBirdState(state);
-  return Boolean(state.swarmBirds[birdKind][keyOf(hex.q, hex.r)]);
-}
-
-function getSwarmBirdAt(state, hex) {
-  ensureSwarmBirdState(state);
-  const k = keyOf(hex.q, hex.r);
-  for (const birdKind of BIRD_KINDS) {
-    if (state.swarmBirds[birdKind][k]) {
-      return birdKind;
-    }
-  }
-  return null;
-}
-
-function getBirdAt(state, hex) {
-  return getMovingBirdAt(state, hex) || getSwarmBirdAt(state, hex);
 }
 
 function getBirdEchoCopyAt(state, hex) {
@@ -1206,7 +1155,6 @@ function recordRecentBirdEvent(state, event) {
   state.recentBirdEvents.push({
     completedTurn: state.turnCount + 1,
     birdKind: event.birdKind === "kingDuck" ? "kingDuck" : "duck",
-    source: event.source === "swarm" ? "swarm" : "moving",
     action: event.action === "remove" ? "remove" : "place",
     hex: { q: event.hex.q, r: event.hex.r }
   });
@@ -1235,6 +1183,52 @@ function getLastTurnBirdEvents(state) {
   ));
 }
 
+function ensureRecentCapRemovalEventsState(state) {
+  if (!Array.isArray(state.recentCapRemovalEvents)) {
+    state.recentCapRemovalEvents = [];
+  }
+}
+
+function recordRecentCapRemovalEvent(state, event) {
+  if (!event || !event.hex || !Number.isFinite(event.hex.q) || !Number.isFinite(event.hex.r)) {
+    return;
+  }
+  ensureRecentCapRemovalEventsState(state);
+  const mode = event.mode === "greek" ? "greek" : "egyptian";
+  const owner = event.owner === 2 ? 2 : 1;
+  state.recentCapRemovalEvents.push({
+    completedTurn: state.turnCount + 1,
+    mode,
+    owner,
+    hex: { q: event.hex.q, r: event.hex.r }
+  });
+  if (state.recentCapRemovalEvents.length > 24) {
+    state.recentCapRemovalEvents = state.recentCapRemovalEvents.slice(-24);
+  }
+}
+
+function pruneRecentCapRemovalEvents(state) {
+  ensureRecentCapRemovalEventsState(state);
+  state.recentCapRemovalEvents = state.recentCapRemovalEvents.filter((event) => (
+    Number.isInteger(event.completedTurn) && event.completedTurn >= state.turnCount
+  ));
+}
+
+function getLastTurnCapRemovalEvents(state) {
+  ensureRecentCapRemovalEventsState(state);
+  if (!state.turnCount) {
+    return [];
+  }
+  return state.recentCapRemovalEvents.filter((event) => (
+    event.completedTurn === state.turnCount
+      && (event.mode === "egyptian" || event.mode === "greek")
+      && (event.owner === 1 || event.owner === 2)
+      && event.hex
+      && Number.isFinite(event.hex.q)
+      && Number.isFinite(event.hex.r)
+  ));
+}
+
 function getCellAt(state, hex) {
   return state.cells[keyOf(hex.q, hex.r)] || null;
 }
@@ -1256,14 +1250,8 @@ function isHexOpenForBird(state, hex, birdKind) {
     return false;
   }
 
-  const movingAt = getMovingBirdAt(state, hex);
-  const currentBirdHex = getBirdHex(state, birdKind);
-  const isCurrentBirdHex = Boolean(currentBirdHex && equalHex(currentBirdHex, hex));
-  if (movingAt && !isCurrentBirdHex) {
-    return false;
-  }
-
-  if (getSwarmBirdAt(state, hex)) {
+  const birdAt = getBirdAt(state, hex);
+  if (birdAt && birdAt !== birdKind) {
     return false;
   }
 
@@ -1272,41 +1260,6 @@ function isHexOpenForBird(state, hex, birdKind) {
     return false;
   }
   return true;
-}
-
-function canToggleSwarmBirdAt(state, hex, birdKind) {
-  if (hasSwarmBirdByKindAt(state, hex, birdKind)) {
-    return true;
-  }
-  if (isStoneOccupied(state, hex)) {
-    return false;
-  }
-  if (getMovingBirdAt(state, hex)) {
-    return false;
-  }
-  if (getSwarmBirdAt(state, hex)) {
-    return false;
-  }
-  if (getBirdEchoCopyAt(state, hex)) {
-    return false;
-  }
-  return true;
-}
-
-function toggleSwarmBird(state, hex, birdKind) {
-  if (!canToggleSwarmBirdAt(state, hex, birdKind)) {
-    return null;
-  }
-  ensureSwarmBirdState(state);
-  const k = keyOf(hex.q, hex.r);
-  if (state.swarmBirds[birdKind][k]) {
-    delete state.swarmBirds[birdKind][k];
-    rebuildPanicZones(state);
-    return { action: "remove", birdKind };
-  }
-  state.swarmBirds[birdKind][k] = true;
-  rebuildPanicZones(state);
-  return { action: "place", birdKind };
 }
 
 function getPlacementAnchorHexes(state) {
@@ -1319,7 +1272,6 @@ function getPlacementAnchorHexes(state) {
 
 function rebuildPanicZones(state) {
   ensureBirdEchoCopyState(state);
-  ensureSwarmBirdState(state);
   state.panicZones = {};
   const panicSourcesByKey = {};
 
@@ -1388,6 +1340,9 @@ function isLegalByBaseRules(state, hex, options = {}) {
 }
 
 function isLegalPlacement(state, hex) {
+  if (hasGreekRemovalPhase(state)) {
+    return false;
+  }
   if (!isLegalByBaseRules(state, hex, { allowOccupied: false })) {
     return false;
   }
@@ -1397,6 +1352,112 @@ function isLegalPlacement(state, hex) {
     return false;
   }
   return true;
+}
+
+function getEgyptianStoneCap(state) {
+  return normaliseEgyptianStoneCap(state?.egyptianStoneCap);
+}
+
+function ensureGreekRemovalState(state) {
+  const pending = state?.greekRemoval;
+  if (!pending || typeof pending !== "object") {
+    state.greekRemoval = null;
+    return;
+  }
+  const owner = pending.owner === 2 ? 2 : 1;
+  const remaining = Math.max(0, Math.round(Number(pending.remaining) || 0));
+  state.greekRemoval = remaining > 0 ? { owner, remaining } : null;
+}
+
+function hasGreekRemovalPhase(state) {
+  ensureGreekRemovalState(state);
+  return Boolean(state.greekRemoval && state.greekRemoval.remaining > 0);
+}
+
+function getStoneOverflowCount(state, owner) {
+  const cap = getEgyptianStoneCap(state);
+  const owned = getOwnerStoneEntriesSortedByAge(state, owner).length;
+  return Math.max(0, owned - cap);
+}
+
+function removeOldestOwnerStones(state, owner, count, sourceMode = "egyptian") {
+  const owned = getOwnerStoneEntriesSortedByAge(state, owner);
+  const toRemove = owned.slice(0, Math.max(0, count));
+  const removed = [];
+  for (const entry of toRemove) {
+    removeStone(state, entry.hex);
+    removed.push(entry.hex);
+    recordRecentCapRemovalEvent(state, {
+      mode: sourceMode,
+      owner,
+      hex: entry.hex
+    });
+  }
+  return removed;
+}
+
+function getOwnerStoneEntriesSortedByAge(state, owner) {
+  return Object.entries(state.cells)
+    .map(([key, cell]) => ({ key, cell }))
+    .filter((entry) => entry.cell.kind === "stone" && entry.cell.owner === owner)
+    .sort((a, b) => a.cell.serial - b.cell.serial)
+    .map((entry) => ({ hex: parseKey(entry.key), cell: entry.cell }));
+}
+
+function enforceEgyptianStoneCap(state, owner) {
+  if (!hasMode(state, "egyptian")) {
+    return [];
+  }
+
+  const overflow = getStoneOverflowCount(state, owner);
+  return overflow > 0 ? removeOldestOwnerStones(state, owner, overflow, "egyptian") : [];
+}
+
+function enforceStoneCapAfterPlacement(state, owner, options = {}) {
+  const interactiveGreek = Boolean(options.interactiveGreek);
+
+  if (hasMode(state, "greek")) {
+    const overflow = getStoneOverflowCount(state, owner);
+    if (overflow <= 0) {
+      return { removed: [], needsChoice: false };
+    }
+
+    if (interactiveGreek) {
+      state.greekRemoval = { owner, remaining: overflow };
+      return { removed: [], needsChoice: true };
+    }
+
+    return { removed: removeOldestOwnerStones(state, owner, overflow, "greek"), needsChoice: false };
+  }
+
+  if (hasMode(state, "egyptian")) {
+    return { removed: enforceEgyptianStoneCap(state, owner), needsChoice: false };
+  }
+
+  return { removed: [], needsChoice: false };
+}
+
+function getEgyptianNextTwoRemovalHexes(state, owner = state.turnPlayer) {
+  if (!hasMode(state, "egyptian") || hasMode(state, "greek")) {
+    return [];
+  }
+
+  const cap = getEgyptianStoneCap(state);
+  const owned = getOwnerStoneEntriesSortedByAge(state, owner);
+  if (owned.length < cap) {
+    return [];
+  }
+
+  return owned.slice(0, 2).map((entry) => ({ ...entry.hex }));
+}
+
+function canSelectGreekRemovalHex(state, hex) {
+  if (!hasGreekRemovalPhase(state)) {
+    return false;
+  }
+  const owner = state.greekRemoval.owner;
+  const cell = getCellAt(state, hex);
+  return Boolean(cell && cell.kind === "stone" && cell.owner === owner);
 }
 
 function placeStone(state, hex, owner, kind = "stone") {
@@ -1546,7 +1607,13 @@ function resolveEchoes(state) {
       continue;
     }
     placeStone(state, target, echo.owner, "stone");
+    const capResolution = enforceStoneCapAfterPlacement(state, echo.owner, { interactiveGreek: false });
     pushLog(`Echo placed Player ${echo.owner} at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`);
+    if (capResolution.removed.length > 0) {
+      const removedList = capResolution.removed.map((pos) => `(${pos.q}, ${pos.r})`).join(", ");
+      const modeLabel = hasMode(state, "greek") ? "Greek" : "Egyptian";
+      pushLog(`${modeLabel} removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} for Player ${echo.owner}: ${removedList}.`);
+    }
   }
   state.pendingEchoes = remain;
 }
@@ -1589,14 +1656,14 @@ function getMeteorTargets(state) {
     }
   }
 
-  for (const { birdKind, source, hex } of getBirdEntries(state)) {
+  for (const { birdKind, hex } of getBirdEntries(state)) {
     const dist = hexDistance(hex);
     if (dist > farthestDistance) {
       farthestDistance = dist;
       farthest.length = 0;
-      farthest.push({ type: "bird", birdKind, source, pos: { ...hex } });
+      farthest.push({ type: "bird", birdKind, pos: { ...hex } });
     } else if (dist === farthestDistance) {
-      farthest.push({ type: "bird", birdKind, source, pos: { ...hex } });
+      farthest.push({ type: "bird", birdKind, pos: { ...hex } });
     }
   }
 
@@ -1608,7 +1675,6 @@ function getMeteorTargets(state) {
 
 function resolveMeteorAccounting(state) {
   ensureBirdEchoCopyState(state);
-  ensureSwarmBirdState(state);
   if (!hasMode(state, "meteorAccounting")) {
     return;
   }
@@ -1625,12 +1691,8 @@ function resolveMeteorAccounting(state) {
 
   for (const entry of farthest) {
     if (entry.type === "bird") {
-      if (entry.source === "swarm") {
-        delete state.swarmBirds[entry.birdKind][keyOf(entry.pos.q, entry.pos.r)];
-      } else {
-        state.birds[entry.birdKind] = null;
-        state.birdEchoCopies[entry.birdKind] = null;
-      }
+      state.birds[entry.birdKind] = null;
+      state.birdEchoCopies[entry.birdKind] = null;
     } else {
       removeStone(state, entry.pos);
     }
@@ -1638,7 +1700,7 @@ function resolveMeteorAccounting(state) {
   rebuildPanicZones(state);
   const coords = farthest.map((entry) => (
     entry.type === "bird"
-      ? `${getBirdMoveTitle(entry.birdKind)}${entry.source === "swarm" ? " swarm" : ""} at (${entry.pos.q}, ${entry.pos.r})`
+      ? `${getBirdMoveTitle(entry.birdKind)} at (${entry.pos.q}, ${entry.pos.r})`
       : `stone at (${entry.pos.q}, ${entry.pos.r})`
   )).join(", ");
   const line = `Meteor removed ${farthest.length} tile${farthest.length === 1 ? "" : "s"} at distance ${farthestDistance}: ${coords}.`;
@@ -1662,6 +1724,7 @@ function endTurn(state) {
   state.turnCount += 1;
   state.round += 1;
   pruneRecentBirdEvents(state);
+  pruneRecentCapRemovalEvents(state);
 
   resolveEchoes(state);
   resolveOrbit(state);
@@ -1679,6 +1742,7 @@ function endTurn(state) {
   state.duckPhase = false;
   state.birdMovesPending = [];
   state.currentBirdMoveKind = null;
+  state.greekRemoval = null;
   state.lastPlacedThisTurn = [];
   syncClockTickerFromState();
 }
@@ -1712,6 +1776,9 @@ function placeTurnTile(state, hex, owner) {
   }
 
   placeStone(state, hex, owner, "stone");
+  const capResolution = enforceStoneCapAfterPlacement(state, owner, {
+    interactiveGreek: hasMode(state, "greek") && owner === state.turnPlayer
+  });
 
   queueEcho(state, {
     kind: "stone",
@@ -1719,7 +1786,26 @@ function placeTurnTile(state, hex, owner) {
     source: state.lastPlacement
   });
 
-  return `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`;
+  if (capResolution.needsChoice) {
+    return {
+      log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}). Greek: choose ${state.greekRemoval?.remaining || 1} stone${(state.greekRemoval?.remaining || 1) === 1 ? "" : "s"} to remove.`,
+      needsGreekChoice: true
+    };
+  }
+
+  if (capResolution.removed.length === 0) {
+    return {
+      log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`,
+      needsGreekChoice: false
+    };
+  }
+
+  const removedList = capResolution.removed.map((pos) => `(${pos.q}, ${pos.r})`).join(", ");
+  const modeLabel = hasMode(state, "greek") ? "Greek" : "Egyptian";
+  return {
+    log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}); ${modeLabel} removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} ${removedList}.`,
+    needsGreekChoice: false
+  };
 }
 
 function clickPlacement(hex) {
@@ -1733,42 +1819,59 @@ function clickPlacement(hex) {
     return;
   }
 
+  if (hasGreekRemovalPhase(state)) {
+    if (!canSelectGreekRemovalHex(state, hex)) {
+      return;
+    }
+
+    saveHistory();
+    recordRecentCapRemovalEvent(state, {
+      mode: "greek",
+      owner: state.greekRemoval.owner,
+      hex
+    });
+    removeStone(state, hex);
+    state.greekRemoval.remaining -= 1;
+    if (state.greekRemoval.remaining <= 0) {
+      const owner = state.greekRemoval.owner;
+      state.greekRemoval = null;
+      pushLog(`Greek removal complete for Player ${owner}.`);
+
+      if (checkForWinner(state)) {
+        updateStatus();
+        syncClockTickerFromState();
+        render();
+        broadcastOnlineState();
+        return;
+      }
+
+      finishSubmove(state);
+    } else {
+      pushLog(`Greek: remove ${state.greekRemoval.remaining} more stone${state.greekRemoval.remaining === 1 ? "" : "s"}.`);
+    }
+
+    updateStatus();
+    syncClockTickerFromState();
+    render();
+    broadcastOnlineState();
+    return;
+  }
+
   if (state.duckPhase) {
     const birdAction = normaliseBirdAction(state.currentBirdMoveKind) || { type: BIRD_ACTION_MOVE, birdKind: "duck" };
-    if (birdAction.type === BIRD_ACTION_MOVE) {
-      const currentBirdHex = getBirdHex(state, birdAction.birdKind);
-      if ((currentBirdHex && equalHex(currentBirdHex, hex)) || !isHexOpenForBird(state, hex, birdAction.birdKind)) {
-        return;
-      }
-      saveHistory();
-      moveBird(state, hex, birdAction.birdKind);
-      syncBirdEchoCopy(state, birdAction.birdKind);
-      recordRecentBirdEvent(state, {
-        birdKind: birdAction.birdKind,
-        source: "moving",
-        action: "place",
-        hex
-      });
-      pushLog(`${getBirdMoveTitle(birdAction.birdKind)} moved to (${hex.q}, ${hex.r}).`);
-    } else {
-      const swarmKind = birdAction.birdKind;
-      if (!canToggleSwarmBirdAt(state, hex, swarmKind)) {
-        return;
-      }
-      saveHistory();
-      const swarmAction = toggleSwarmBird(state, hex, swarmKind);
-      if (!swarmAction) {
-        return;
-      }
-      recordRecentBirdEvent(state, {
-        birdKind: swarmKind,
-        source: "swarm",
-        action: swarmAction.action,
-        hex
-      });
-      const verb = swarmAction.action === "remove" ? "removed from" : "placed at";
-      pushLog(`${getBirdMoveTitle(swarmKind)} swarm ${verb} (${hex.q}, ${hex.r}).`);
+    const currentBirdHex = getBirdHex(state, birdAction.birdKind);
+    if ((currentBirdHex && equalHex(currentBirdHex, hex)) || !isHexOpenForBird(state, hex, birdAction.birdKind)) {
+      return;
     }
+    saveHistory();
+    moveBird(state, hex, birdAction.birdKind);
+    syncBirdEchoCopy(state, birdAction.birdKind);
+    recordRecentBirdEvent(state, {
+      birdKind: birdAction.birdKind,
+      action: "place",
+      hex
+    });
+    pushLog(`${getBirdMoveTitle(birdAction.birdKind)} moved to (${hex.q}, ${hex.r}).`);
 
     if (state.birdMovesPending.length > 0) {
       state.currentBirdMoveKind = state.birdMovesPending.shift();
@@ -1791,11 +1894,19 @@ function clickPlacement(hex) {
   }
 
   saveHistory();
-  const placementLog = placeTurnTile(state, hex, state.turnPlayer);
-  if (!placementLog) {
+  const placementResult = placeTurnTile(state, hex, state.turnPlayer);
+  if (!placementResult) {
     return;
   }
-  pushLog(placementLog);
+  pushLog(placementResult.log);
+
+  if (placementResult.needsGreekChoice) {
+    updateStatus();
+    syncClockTickerFromState();
+    render();
+    broadcastOnlineState();
+    return;
+  }
 
   if (checkForWinner(state)) {
     updateStatus();
@@ -1828,6 +1939,10 @@ function updateStatus() {
 
   if (!state.openingMoveDone) {
     ui.subturnText.textContent = "Opening move: 1 placement";
+  } else if (hasGreekRemovalPhase(state)) {
+    const owner = state.greekRemoval.owner;
+    const remaining = state.greekRemoval.remaining;
+    ui.subturnText.textContent = `Greek: Player ${owner} choose ${remaining} stone${remaining === 1 ? "" : "s"} to remove`;
   } else if (state.duckPhase) {
     ui.subturnText.textContent = getBirdActionPrompt(state.currentBirdMoveKind);
   } else {
@@ -1927,6 +2042,7 @@ function drawGrid() {
     && canActForCurrentTurn()
     && !game.state.winner
     && !game.state.duckPhase
+    && !hasGreekRemovalPhase(game.state)
   );
   const gridStroke = drawStep > 1 ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.08)";
   const gridFill = drawStep > 1 ? "rgba(255, 255, 255, 0.018)" : "rgba(255, 255, 255, 0.025)";
@@ -2161,11 +2277,10 @@ function drawBirdEchoCopy(birdKind, copyHex, size) {
   ctx.restore();
 }
 
-function drawBirdPiece(birdKind, birdHex, size, birdSource = "moving") {
+function drawBirdPiece(birdKind, birdHex, size) {
   const world = axialToPixel(birdHex, size);
   const screen = worldToScreen(world.x, world.y);
   const isKingDuck = birdKind === "kingDuck";
-  const isSwarmBird = birdSource === "swarm";
   const fill = isKingDuck ? "#ffcf63" : "#ffd75e";
   const stroke = isKingDuck ? "rgba(255, 179, 92, 0.95)" : "rgba(255,255,255,0.55)";
 
@@ -2183,12 +2298,6 @@ function drawBirdPiece(birdKind, birdHex, size, birdSource = "moving") {
   if (isKingDuck) {
     ctx.font = `${Math.max(11, size * 0.5)}px system-ui`;
     ctx.fillText("\u{1F451}", screen.x, screen.y - size * 0.48);
-  }
-
-  if (isSwarmBird) {
-    ctx.font = `${Math.max(9, size * 0.31)}px system-ui`;
-    ctx.fillText("\u{1F45F}", screen.x - size * 0.18, screen.y + size * 0.44);
-    ctx.fillText("\u{1F45F}", screen.x + size * 0.18, screen.y + size * 0.44);
   }
 }
 
@@ -2240,6 +2349,85 @@ function drawPieces() {
     }
   }
 
+  if (hasMode(game.state, "egyptian") && !game.state.winner) {
+    const owner = game.state.turnPlayer === 2 ? 2 : 1;
+    const upcoming = getEgyptianNextTwoRemovalHexes(game.state, owner);
+    const stroke = owner === 2 ? "rgba(255, 140, 140, 0.92)" : "rgba(109, 198, 255, 0.92)";
+    const textFill = owner === 2 ? "rgba(255, 180, 180, 0.95)" : "rgba(180, 225, 255, 0.95)";
+
+    upcoming.forEach((hex, idx) => {
+      const world = axialToPixel(hex, size);
+      const screen = worldToScreen(world.x, world.y);
+      if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+        return;
+      }
+
+      ctx.save();
+      ctx.setLineDash(idx === 0 ? [] : [5, 4]);
+      drawHex(screen.x, screen.y, size * 1.02, "rgba(255,255,255,0.02)", stroke, idx === 0 ? 3 : 2.2);
+      ctx.restore();
+
+      ctx.fillStyle = textFill;
+      ctx.font = `${Math.max(9, size * 0.34)}px system-ui`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(idx + 1), screen.x, screen.y - size * 0.93);
+    });
+  }
+
+  if (hasGreekRemovalPhase(game.state) && !game.state.winner) {
+    const owner = game.state.greekRemoval.owner;
+    const ownerEntries = getOwnerStoneEntriesSortedByAge(game.state, owner);
+    const stroke = owner === 2 ? "rgba(255, 140, 140, 0.92)" : "rgba(109, 198, 255, 0.92)";
+
+    for (const entry of ownerEntries) {
+      const world = axialToPixel(entry.hex, size);
+      const screen = worldToScreen(world.x, world.y);
+      if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+        continue;
+      }
+
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      drawHex(screen.x, screen.y, size * 1.02, "rgba(255,255,255,0.02)", stroke, 2.3);
+      ctx.restore();
+    }
+  }
+
+  const recentCapRemovalEvents = getLastTurnCapRemovalEvents(game.state);
+  for (const event of recentCapRemovalEvents) {
+    const world = axialToPixel(event.hex, size);
+    const screen = worldToScreen(world.x, world.y);
+    if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+      continue;
+    }
+
+    const stroke = event.owner === 2 ? "rgba(255, 140, 140, 0.9)" : "rgba(109, 198, 255, 0.9)";
+    const accent = event.mode === "greek" ? "rgba(255, 236, 179, 0.96)" : "rgba(230, 245, 255, 0.95)";
+    ctx.save();
+    if (event.mode === "greek") {
+      ctx.setLineDash([6, 4]);
+    }
+    drawHex(
+      screen.x,
+      screen.y,
+      size * 0.98,
+      "rgba(255, 255, 255, 0.025)",
+      stroke,
+      2.5
+    );
+    ctx.restore();
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(screen.x - size * 0.17, screen.y - size * 0.17);
+    ctx.lineTo(screen.x + size * 0.17, screen.y + size * 0.17);
+    ctx.moveTo(screen.x + size * 0.17, screen.y - size * 0.17);
+    ctx.lineTo(screen.x - size * 0.17, screen.y + size * 0.17);
+    ctx.stroke();
+  }
+
   const recentBirdEvents = getLastTurnBirdEvents(game.state);
   for (const event of recentBirdEvents) {
     const world = axialToPixel(event.hex, size);
@@ -2277,13 +2465,13 @@ function drawPieces() {
     }
   }
 
-  for (const { birdKind, source, hex } of getBirdEntries(game.state)) {
+  for (const { birdKind, hex } of getBirdEntries(game.state)) {
     const world = axialToPixel(hex, size);
     const screen = worldToScreen(world.x, world.y);
     if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
       continue;
     }
-    drawBirdPiece(birdKind, hex, size, source);
+    drawBirdPiece(birdKind, hex, size);
   }
 
   for (const { birdKind, hex } of getBirdEchoCopyEntries(game.state)) {
@@ -2398,8 +2586,10 @@ function centreBoard() {
 
 function newGame(modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfig) {
   game.timerConfig = normaliseTimerConfig(timerConfig);
+  game.egyptianStoneCap = getEgyptianStoneCapFromInputs();
   setTimerInputs(game.timerConfig);
-  game.state = makeInitialState(modeKeys, game.timerConfig);
+  setEgyptianCapInput(game.egyptianStoneCap);
+  game.state = makeInitialState(modeKeys, game.timerConfig, game.egyptianStoneCap);
   ensureClockState(game.state);
   game.history = [];
   centreBoard();
@@ -2635,9 +2825,15 @@ function refreshTimerSummaryFromInputs() {
     : "Disabled";
 }
 
+function refreshEgyptianCapSummaryFromInputs() {
+  const cap = getEgyptianStoneCapFromInputs();
+  setEgyptianCapInput(cap);
+}
+
 ui.timerMinutesInput.addEventListener("input", refreshTimerSummaryFromInputs);
 ui.timerIncrementInput.addEventListener("input", refreshTimerSummaryFromInputs);
 ui.timerEnabledInput.addEventListener("change", refreshTimerSummaryFromInputs);
+ui.egyptianCapInput?.addEventListener("input", refreshEgyptianCapSummaryFromInputs);
 
 ui.onlineCreateBtn.addEventListener("click", () => {
   createOnlineRoom();
@@ -2660,6 +2856,7 @@ ui.appRoot.addEventListener("transitionend", (event) => {
 
 fillModePicker();
 setTimerInputs(game.timerConfig);
+setEgyptianCapInput(game.egyptianStoneCap);
 updateOnlineStatusUI();
 setOptionsMenuCollapsed(false);
 setSelectedModeKeys([]);
