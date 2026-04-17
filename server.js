@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
+const { safeJoinWithinRoot } = require("./server-path-utils");
 
 const ROOT_DIR = __dirname;
 const DEFAULT_PORT = 8080;
@@ -90,19 +91,7 @@ const WS_PATH = parseWsPath();
 const WS_HEARTBEAT_MS = parseWsHeartbeatMs();
 
 function safeJoin(requestPath) {
-  let decoded = requestPath.split("?")[0];
-  try {
-    decoded = decodeURIComponent(decoded);
-  } catch (error) {
-    return null;
-  }
-  const normalised = path.normalize(decoded);
-  const relative = normalised.replace(/^([/\\])+/, "");
-  const fullPath = path.join(ROOT_DIR, relative);
-  if (!fullPath.startsWith(ROOT_DIR)) {
-    return null;
-  }
-  return fullPath;
+  return safeJoinWithinRoot(ROOT_DIR, requestPath);
 }
 
 function sendFile(res, filePath) {

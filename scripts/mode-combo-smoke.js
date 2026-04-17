@@ -1,0 +1,584 @@
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+const assert = require("assert/strict");
+const PROJECT_ROOT = fs.existsSync(path.resolve(process.cwd(), "game.js"))
+  ? process.cwd()
+  : path.resolve(__dirname, "..");
+
+class FakeClassList {
+  constructor(initial = "") {
+    this.tokens = new Set();
+    this.setFromString(initial);
+  }
+
+  setFromString(value) {
+    this.tokens.clear();
+    String(value || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .forEach((token) => this.tokens.add(token));
+  }
+
+  add(...tokens) {
+    tokens.filter(Boolean).forEach((token) => this.tokens.add(token));
+  }
+
+  remove(...tokens) {
+    tokens.filter(Boolean).forEach((token) => this.tokens.delete(token));
+  }
+
+  toggle(token, force) {
+    if (force === true) {
+      this.tokens.add(token);
+      return true;
+    }
+    if (force === false) {
+      this.tokens.delete(token);
+      return false;
+    }
+    if (this.tokens.has(token)) {
+      this.tokens.delete(token);
+      return false;
+    }
+    this.tokens.add(token);
+    return true;
+  }
+
+  contains(token) {
+    return this.tokens.has(token);
+  }
+
+  toString() {
+    return Array.from(this.tokens).join(" ");
+  }
+}
+
+function createMatcher(selector) {
+  if (selector === ".modeToggle") {
+    return (element) => element.classList.contains("modeToggle");
+  }
+  if (selector === ".modeToggle.active") {
+    return (element) => element.classList.contains("modeToggle") && element.classList.contains("active");
+  }
+  return () => false;
+}
+
+function walkDescendants(element, visit) {
+  for (const child of element.children) {
+    visit(child);
+    walkDescendants(child, visit);
+  }
+}
+
+class FakeElement {
+  constructor(tagName = "div", id = "") {
+    this.tagName = String(tagName).toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.attributes = {};
+    this.style = {};
+    this.eventListeners = new Map();
+    this._classList = new FakeClassList();
+    this.textContent = "";
+    this.innerHTML = "";
+    this.value = "";
+    this.checked = false;
+    this.disabled = false;
+    this.hidden = false;
+    this.clientWidth = 0;
+    this.clientHeight = 0;
+    this.width = 0;
+    this.height = 0;
+  }
+
+  get classList() {
+    return this._classList;
+  }
+
+  get className() {
+    return this._classList.toString();
+  }
+
+  set className(value) {
+    this._classList.setFromString(value);
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+    if (name === "class") {
+      this.className = String(value);
+    }
+  }
+
+  appendChild(child) {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+
+  addEventListener(type, handler) {
+    if (!this.eventListeners.has(type)) {
+      this.eventListeners.set(type, []);
+    }
+    this.eventListeners.get(type).push(handler);
+  }
+
+  querySelectorAll(selector) {
+    const matcher = createMatcher(selector);
+    const results = [];
+    walkDescendants(this, (element) => {
+      if (matcher(element)) {
+        results.push(element);
+      }
+    });
+    return results;
+  }
+
+  getBoundingClientRect() {
+    const width = this.clientWidth || this.width || 0;
+    const height = this.clientHeight || this.height || 0;
+    return {
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      width,
+      height
+    };
+  }
+}
+
+function createFakeContext2d() {
+  const noop = () => {};
+  return {
+    clearRect: noop,
+    setTransform: noop,
+    beginPath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    closePath: noop,
+    fill: noop,
+    stroke: noop,
+    arc: noop,
+    fillText: noop,
+    save: noop,
+    restore: noop,
+    setLineDash: noop
+  };
+}
+
+class FakeCanvasElement extends FakeElement {
+  constructor(id = "") {
+    super("canvas", id);
+    this.clientWidth = 140;
+    this.clientHeight = 120;
+    this.width = 140;
+    this.height = 120;
+    this._context2d = createFakeContext2d();
+  }
+
+  getContext(type) {
+    if (type !== "2d") {
+      return null;
+    }
+    return this._context2d;
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    this.elementsById = new Map();
+  }
+
+  register(element) {
+    if (element.id) {
+      this.elementsById.set(element.id, element);
+    }
+    return element;
+  }
+
+  getElementById(id) {
+    return this.elementsById.get(id) || null;
+  }
+
+  createElement(tagName) {
+    return new FakeElement(tagName);
+  }
+
+  querySelector() {
+    return null;
+  }
+}
+
+function makeSandbox() {
+  const document = new FakeDocument();
+  const ids = [
+    "appRoot",
+    "modePicker",
+    "newGameBtn",
+    "undoBtn",
+    "centreBtn",
+    "turnBig",
+    "subturnText",
+    "roundText",
+    "movesLeftText",
+    "duckPhaseText",
+    "winnerText",
+    "modeName",
+    "modeSummary",
+    "egyptianCapControls",
+    "egyptianCapInput",
+    "egyptianCapSummaryText",
+    "log",
+    "overlayTitle",
+    "overlayHint",
+    "coordText",
+    "zoomText",
+    "timerMinutesInput",
+    "timerIncrementInput",
+    "timerEnabledInput",
+    "applyTimerBtn",
+    "timerSummaryText",
+    "p1ClockText",
+    "p2ClockText",
+    "onlineCreateBtn",
+    "onlineJoinBtn",
+    "onlineLeaveBtn",
+    "onlineRoomInput",
+    "onlineStatusText",
+    "onlineRoomText",
+    "onlineRoleText",
+    "toggleMenuBtn",
+    "turnOrderInput",
+    "turnOrderSummaryText",
+    "boardClockP1",
+    "boardClockP2",
+    "boardClockP1Time",
+    "boardClockP2Time"
+  ];
+
+  for (const id of ids) {
+    document.register(new FakeElement("div", id));
+  }
+  document.register(new FakeCanvasElement("board"));
+
+  const appRoot = document.getElementById("appRoot");
+  appRoot.className = "app";
+  document.getElementById("modePicker").className = "modePickerGrid";
+  document.getElementById("timerMinutesInput").value = "5";
+  document.getElementById("timerIncrementInput").value = "2";
+  document.getElementById("timerEnabledInput").checked = true;
+  document.getElementById("egyptianCapInput").value = "12";
+  document.getElementById("turnOrderInput").value = "p1First";
+  document.getElementById("boardClockP1").className = "boardClock boardClockP1";
+  document.getElementById("boardClockP2").className = "boardClock boardClockP2";
+
+  let nextAnimationId = 1;
+  let nextTimerId = 1;
+  const timers = new Map();
+
+  const sandbox = {
+    console,
+    Math,
+    Date,
+    Map,
+    Set,
+    Array,
+    Object,
+    Number,
+    String,
+    Boolean,
+    JSON,
+    URL,
+    URLSearchParams,
+    structuredClone,
+    document,
+    location: {
+      protocol: "http:",
+      host: "localhost:8080",
+      href: "http://localhost:8080/index.html",
+      search: ""
+    },
+    navigator: { userAgent: "node" },
+    devicePixelRatio: 1,
+    requestAnimationFrame: (callback) => {
+      const id = nextAnimationId += 1;
+      callback();
+      return id;
+    },
+    cancelAnimationFrame: () => {},
+    setTimeout: (callback) => {
+      const id = nextTimerId += 1;
+      timers.set(id, { callback, interval: false });
+      callback();
+      return id;
+    },
+    clearTimeout: (id) => {
+      timers.delete(id);
+    },
+    setInterval: (callback) => {
+      const id = nextTimerId += 1;
+      timers.set(id, { callback, interval: true });
+      return id;
+    },
+    clearInterval: (id) => {
+      timers.delete(id);
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  return sandbox;
+}
+
+function loadScript(sandbox, fileName) {
+  const fullPath = path.resolve(PROJECT_ROOT, fileName);
+  const source = fs.readFileSync(fullPath, "utf8");
+  vm.runInContext(source, sandbox, { filename: fullPath });
+}
+
+function keyOf(hex) {
+  return `${hex.q},${hex.r}`;
+}
+
+function parseKey(key) {
+  const [q, r] = key.split(",").map(Number);
+  return { q, r };
+}
+
+function equalHex(a, b) {
+  return Boolean(a && b && a.q === b.q && a.r === b.r);
+}
+
+function hexDistance(hex) {
+  const s = -hex.q - hex.r;
+  return Math.max(Math.abs(hex.q), Math.abs(hex.r), Math.abs(s));
+}
+
+function buildCandidateHexes(radius, reverse = false) {
+  const hexes = [];
+  for (let q = -radius; q <= radius; q += 1) {
+    for (let r = -radius; r <= radius; r += 1) {
+      hexes.push({ q, r });
+    }
+  }
+  hexes.sort((a, b) => (
+    hexDistance(a) - hexDistance(b)
+      || a.q - b.q
+      || a.r - b.r
+  ));
+  if (reverse) {
+    hexes.reverse();
+  }
+  return hexes;
+}
+
+function stateFingerprint(state) {
+  return JSON.stringify(state);
+}
+
+function getOwnerStoneCount(state, owner) {
+  return Object.values(state.cells).filter((cell) => cell.kind === "stone" && cell.owner === owner).length;
+}
+
+function assertStateInvariants(sandbox, state) {
+  assert.ok(Array.isArray(state.modeKeys), "modeKeys should be an array");
+  assert.ok(!state.modeKeys.includes("greek"), "greek mode key should never survive normalisation");
+  assert.ok(Number.isInteger(state.movesLeftInTurn) && state.movesLeftInTurn >= 0, "movesLeftInTurn must be a non-negative integer");
+
+  const hasEgyptian = state.modeKeys.includes("egyptian");
+  const hasEgyptianRemoval = sandbox.hasEgyptianRemovalPhase(state);
+  const cap = sandbox.getEgyptianStoneCap(state);
+  const owner1 = getOwnerStoneCount(state, 1);
+  const owner2 = getOwnerStoneCount(state, 2);
+
+  if (hasEgyptian) {
+    if (hasEgyptianRemoval) {
+      const removal = state.egyptianRemoval;
+      assert.ok(removal && (removal.owner === 1 || removal.owner === 2), "egyptian removal state owner should be valid");
+      assert.ok(removal.remaining > 0, "egyptian removal remaining should be positive");
+      const currentOwnerCount = removal.owner === 1 ? owner1 : owner2;
+      assert.equal(currentOwnerCount - cap, removal.remaining, "overflow count should match pending egyptian removals");
+      if (state.lastPlacement) {
+        assert.equal(
+          sandbox.canSelectEgyptianRemovalHex(state, state.lastPlacement),
+          false,
+          "just-placed stone must not be selectable during egyptian removal"
+        );
+      }
+    } else {
+      assert.ok(owner1 <= cap && owner2 <= cap, "stone counts should respect egyptian cap when no removal is pending");
+    }
+  } else {
+    assert.equal(hasEgyptianRemoval, false, "egyptian removal should not run when egyptian mode is inactive");
+  }
+
+  for (const birdKind of ["duck", "kingDuck"]) {
+    const birdHex = state.birds?.[birdKind];
+    if (birdHex) {
+      assert.equal(Boolean(state.cells[keyOf(birdHex)]), false, `${birdKind} should not overlap a stone`);
+    }
+    const copyHex = state.birdEchoCopies?.[birdKind];
+    if (copyHex) {
+      assert.equal(Boolean(state.cells[keyOf(copyHex)]), false, `${birdKind} echo copy should not overlap a stone`);
+    }
+  }
+}
+
+function pickLegalPlacement(sandbox, state, candidateHexes) {
+  for (const hex of candidateHexes) {
+    if (sandbox.isLegalPlacement(state, hex)) {
+      return hex;
+    }
+  }
+  return null;
+}
+
+function pickBirdTarget(sandbox, state, candidateHexes) {
+  const action = sandbox.normaliseBirdAction(state.currentBirdMoveKind) || { birdKind: "duck" };
+  const birdKind = action.birdKind;
+  const currentBirdHex = state.birds[birdKind];
+  for (const hex of candidateHexes) {
+    if (currentBirdHex && equalHex(currentBirdHex, hex)) {
+      continue;
+    }
+    if (sandbox.isHexOpenForBird(state, hex, birdKind)) {
+      return hex;
+    }
+  }
+  return null;
+}
+
+function pickEgyptianRemovalHex(sandbox, state, reverse = false) {
+  const owner = state.egyptianRemoval.owner;
+  const entries = Object.entries(state.cells)
+    .map(([key, cell]) => ({ hex: parseKey(key), cell }))
+    .filter((entry) => entry.cell.kind === "stone" && entry.cell.owner === owner)
+    .sort((a, b) => reverse ? b.cell.serial - a.cell.serial : a.cell.serial - b.cell.serial);
+
+  for (const entry of entries) {
+    if (sandbox.canSelectEgyptianRemovalHex(state, entry.hex)) {
+      return entry.hex;
+    }
+  }
+  return null;
+}
+
+function runScenario(sandbox, modeKeys, reverse = false) {
+  const timerConfig = { enabled: false, initialMinutes: 5, incrementSeconds: 0 };
+  sandbox.window.newGame(modeKeys, timerConfig, "p1First");
+
+  const capControls = sandbox.document.getElementById("egyptianCapControls");
+  assert.equal(
+    capControls.hidden,
+    !modeKeys.includes("egyptian"),
+    "egyptian n controls should only be visible when egyptian mode is selected"
+  );
+
+  const candidateHexes = buildCandidateHexes(14, reverse);
+  const maxActions = 100;
+
+  for (let step = 0; step < maxActions; step += 1) {
+    const state = sandbox.HexTicTacToeInternals.game.state;
+    assertStateInvariants(sandbox, state);
+
+    if (state.winner) {
+      const before = stateFingerprint(state);
+      sandbox.clickPlacement({ q: 0, r: 0 });
+      assert.equal(stateFingerprint(state), before, "clicks after winner should not mutate state");
+      return;
+    }
+
+    if (sandbox.hasEgyptianRemovalPhase(state)) {
+      if (state.lastPlacement) {
+        const beforeProtected = stateFingerprint(state);
+        sandbox.clickPlacement({ ...state.lastPlacement });
+        assert.equal(
+          stateFingerprint(state),
+          beforeProtected,
+          "protected just-placed egyptian stone should not be removable"
+        );
+      }
+      const target = pickEgyptianRemovalHex(sandbox, state, reverse);
+      assert.ok(target, "expected a valid egyptian removal target");
+      sandbox.clickPlacement(target);
+      continue;
+    }
+
+    if (state.duckPhase) {
+      const action = sandbox.normaliseBirdAction(state.currentBirdMoveKind) || { birdKind: "duck" };
+      const currentBirdHex = state.birds[action.birdKind];
+      if (currentBirdHex) {
+        const beforeCurrent = stateFingerprint(state);
+        sandbox.clickPlacement({ ...currentBirdHex });
+        assert.equal(stateFingerprint(state), beforeCurrent, "bird should not be able to move onto its current hex");
+      }
+      const birdTarget = pickBirdTarget(sandbox, state, candidateHexes);
+      assert.ok(birdTarget, "expected a legal bird move target");
+      sandbox.clickPlacement(birdTarget);
+      continue;
+    }
+
+    const beforeIllegal = stateFingerprint(state);
+    sandbox.clickPlacement({ q: 99, r: -99 });
+    assert.equal(stateFingerprint(state), beforeIllegal, "illegal far placement should not mutate state");
+
+    const legalHex = pickLegalPlacement(sandbox, state, candidateHexes);
+    assert.ok(legalHex, "expected at least one legal placement");
+    sandbox.clickPlacement(legalHex);
+  }
+  assertStateInvariants(sandbox, sandbox.HexTicTacToeInternals.game.state);
+}
+
+function allModeCombos(modeKeys) {
+  const combos = [];
+  const total = 1 << modeKeys.length;
+  for (let mask = 0; mask < total; mask += 1) {
+    const combo = [];
+    for (let i = 0; i < modeKeys.length; i += 1) {
+      if (mask & (1 << i)) {
+        combo.push(modeKeys[i]);
+      }
+    }
+    combos.push(combo);
+  }
+  return combos;
+}
+
+function main() {
+  const sandbox = makeSandbox();
+  const context = vm.createContext(sandbox);
+
+  loadScript(context, "perf-helpers.js");
+  loadScript(context, "timer-helpers.js");
+  loadScript(context, "game.js");
+  loadScript(context, "turn-order-patch.js");
+
+  const modeButtons = context.document.getElementById("modePicker").children;
+  const modeKeys = modeButtons.map((button) => button.dataset.mode);
+  assert.ok(modeKeys.includes("egyptian"), "egyptian mode should exist");
+  assert.equal(modeKeys.includes("greek"), false, "greek mode should not exist");
+
+  // Legacy compatibility: old "greek" selection maps to "egyptian".
+  context.window.newGame(["greek"], { enabled: false, initialMinutes: 5, incrementSeconds: 0 }, "p1First");
+  assert.equal(
+    JSON.stringify(Array.from(context.HexTicTacToeInternals.game.state.modeKeys)),
+    JSON.stringify(["egyptian"]),
+    "legacy greek key should canonicalise to egyptian"
+  );
+  assert.equal(context.document.getElementById("egyptianCapControls").hidden, false, "legacy greek key should still reveal n controls");
+
+  const combos = allModeCombos(modeKeys);
+  for (const combo of combos) {
+    runScenario(context, combo, false);
+    runScenario(context, combo, true);
+  }
+
+  console.log(`Mode combo smoke tests passed (${combos.length} combos x 2 scenarios).`);
+}
+
+main();

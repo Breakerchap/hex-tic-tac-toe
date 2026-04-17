@@ -1,6 +1,7 @@
 const fs = require("fs");
 const vm = require("vm");
 const assert = require("assert/strict");
+const path = require("path");
 
 function assertHexEqual(actual, expected, message) {
   assert.equal(actual.q, expected.q, `${message} (q)`);
@@ -31,6 +32,25 @@ function loadUmdModule(filePath, globalName) {
     throw new Error(`Could not load ${globalName} from ${filePath}`);
   }
   return mod;
+}
+
+function loadCommonJsModule(filePath) {
+  const code = fs.readFileSync(filePath, "utf8");
+  const module = { exports: {} };
+  const sandbox = {
+    module,
+    exports: module.exports,
+    require: (id) => {
+      if (id === "path") {
+        return path;
+      }
+      throw new Error(`Unsupported module request in test sandbox: ${id}`);
+    },
+    __dirname: process.cwd(),
+    __filename: filePath
+  };
+  vm.runInNewContext(code, sandbox, { filename: filePath });
+  return module.exports;
 }
 
 function runPerfTests(perf) {
@@ -205,10 +225,27 @@ function runTimerTests(timer) {
   assert.equal(timer.formatClock(599), "09:59");
 }
 
+function runServerPathTests(serverPathUtils) {
+  const rootA = path.resolve(process.cwd(), "public");
+  const rootB = path.resolve(process.cwd(), "www");
+
+  assert.equal(
+    serverPathUtils.safeJoinWithinRoot(rootA, "/assets/app.js?cache=1"),
+    path.join(rootA, "assets", "app.js")
+  );
+  assert.equal(serverPathUtils.safeJoinWithinRoot(rootA, "/../secrets.txt"), null);
+  assert.equal(serverPathUtils.safeJoinWithinRoot(rootA, "/..\\secrets.txt"), null);
+  assert.equal(serverPathUtils.safeJoinWithinRoot(rootA, "/%2e%2e/%2e%2e/windows/system.ini"), null);
+  assert.equal(serverPathUtils.safeJoinWithinRoot(rootA, "/assets/%E0%A4%A.txt"), null);
+  assert.equal(serverPathUtils.safeJoinWithinRoot(rootB, "/../www-archive/index.html"), null);
+}
+
 const perf = loadUmdModule("perf-helpers.js", "HexTicTacToePerf");
 const timer = loadUmdModule("timer-helpers.js", "HexTicTacToeTimer");
+const serverPathUtils = loadCommonJsModule("server-path-utils.js");
 
 runPerfTests(perf);
 runTimerTests(timer);
+runServerPathTests(serverPathUtils);
 
-console.log("All helper tests passed.");
+console.log("All helper and server path tests passed.");

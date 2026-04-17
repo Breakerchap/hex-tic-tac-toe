@@ -5,7 +5,8 @@
   "description": "Infinite Hex Tic-Tac-Toe with online rooms and configurable timers",
   "scripts": {
     "start": "node server.js",
-    "test": "node -e \"eval(require('fs').readFileSync('scripts/run-tests-eval.js','utf8'))\""
+    "test": "node -e \"eval(require('fs').readFileSync('scripts/run-tests-eval.js','utf8'))\"",
+    "test:node": "node --test"
   },
   "dependencies": {
     "ws": "^8.18.0"

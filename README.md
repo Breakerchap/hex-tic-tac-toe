@@ -1,7 +1,7 @@
 # Infinite Hex Tic-Tac-Toe
 
 A browser-based infinite hex-grid strategy game where players race to connect **6 in a row**.  
-It includes stackable rule modes like `Duck`, `King Duck`, `Egyptian`, `Greek`, `Echo`, `Orbit`, and `Meteor`.
+It includes stackable rule modes like `Duck`, `King Duck`, `Egyptian`, `Echo`, `Orbit`, and `Meteor`.
 
 ## Quick Start
 
@@ -11,6 +11,7 @@ It includes stackable rule modes like `Duck`, `King Duck`, `Egyptian`, `Greek`, 
 
 ```bash
 npm install
+npm test
 npm start
 ```
 
@@ -66,8 +67,7 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 
 - **Duck**: move duck after your placements; no one can place on it.
 - **King Duck**: adds a panic ring around the king duck.
-- **Egyptian**: each player can keep at most `n` stones (set `n` in the UI); placing beyond `n` removes your oldest stones first.
-- **Greek**: uses the same `n` cap, but when you go over cap you choose which of your stones to remove.
+- **Egyptian**: each player can keep at most `n` stones (set `n` in the UI); when you go over `n`, choose which of your own stones to remove (not the one just placed).
 - **Echo**: mirrors placements/bird moves after two full turns.
 - **Orbit**: stones move one orbit step per full turn (birds stay put).
 - **Meteor**: every 3 full turns, farthest occupied hexes are removed.
@@ -78,15 +78,17 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 index.html                        # Markup shell
 styles.css                        # Styling and animated background
 game.js                           # Game logic and rendering
+server.js                         # Static host + WebSocket room server
+server-path-utils.js              # Path-safety helper used by the server
+tests/                            # Node test suite
 ```
 
-## GitHub Pages
+## Publish Checklist
 
-This repo includes a workflow at `.github/workflows/pages.yml` for static deployment.
-
-1. Push to `main`.
-2. In GitHub repository settings, enable **Pages** with **GitHub Actions** as source.
-3. The workflow will publish the site automatically on pushes to `main`.
+1. Run `npm test` and confirm all tests pass.
+2. Start the app with `npm start` and verify local play + online room creation.
+3. Ensure the deployed environment provides `PORT` (and optionally `WS_PATH`, `WS_HEARTBEAT_MS`).
+4. If frontend/backend are split across hosts, configure the websocket endpoint (`?ws=`, meta tag, or `window.HEX_TTT_WS_URL`).
 
 ## License
 

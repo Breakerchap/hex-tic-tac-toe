@@ -17,6 +17,7 @@ const ui = {
   winnerText: document.getElementById("winnerText"),
   modeName: document.getElementById("modeName"),
   modeSummary: document.getElementById("modeSummary"),
+  egyptianCapControls: document.getElementById("egyptianCapControls"),
   egyptianCapInput: document.getElementById("egyptianCapInput"),
   egyptianCapSummaryText: document.getElementById("egyptianCapSummaryText"),
   log: document.getElementById("log"),
@@ -149,7 +150,7 @@ const switchClockTurn = timerHelpers.switchTurnWithIncrement || function localSw
 
 const BASE_MODE = {
   name: "Classic",
-  summary: "Standard rules with the origin start and the 8-hex placement limit.",
+  summary: "Standard rules with the origin start and the 11-hex placement limit.",
   hint: "Classic mode: make a line of 6. No extra effects are active."
 };
 
@@ -161,13 +162,8 @@ const MODES = {
   },
   egyptian: {
     name: "Egyptian",
-    summary: "Each player may keep at most n stones. After placing beyond n, that player's oldest stones are removed.",
-    hint: "Set n in the sidebar. If you go over n stones, your oldest stones are removed (preview rings show what expires next)."
-  },
-  greek: {
-    name: "Greek",
-    summary: "Like Egyptian cap mode, but when you exceed n you choose which of your stones to remove.",
-    hint: "Set n in the sidebar. When you exceed n, click one of your own stones to remove."
+    summary: "Each player may keep at most n stones. When you exceed n, choose which of your own stones to remove.",
+    hint: "Set n in the sidebar. When you exceed n, click one of your own stones to remove. You cannot remove the stone you just placed."
   },
   orbit: {
     name: "Orbit",
@@ -375,16 +371,33 @@ const online = {
 const ONLINE_RECONNECT_BASE_MS = 1000;
 const ONLINE_RECONNECT_MAX_MS = 10000;
 
+function toCanonicalModeKey(modeKey) {
+  return modeKey === "greek" ? "egyptian" : modeKey;
+}
+
 function normaliseModeKeys(modeKeys) {
-  const seen = new Set();
+  const requested = new Set(
+    (Array.isArray(modeKeys) ? modeKeys : [])
+      .map((modeKey) => toCanonicalModeKey(modeKey))
+  );
   const ordered = [];
   for (const key of Object.keys(MODES)) {
-    if (modeKeys.includes(key) && !seen.has(key)) {
-      seen.add(key);
+    if (requested.has(key)) {
       ordered.push(key);
     }
   }
   return ordered;
+}
+
+function modeUsesEgyptianCap(modeKeys) {
+  return normaliseModeKeys(modeKeys).includes("egyptian");
+}
+
+function refreshEgyptianCapControls(modeKeys) {
+  if (!ui.egyptianCapControls) {
+    return;
+  }
+  ui.egyptianCapControls.hidden = !modeUsesEgyptianCap(modeKeys);
 }
 
 function modeKeySignature(modeKeys) {
@@ -501,7 +514,7 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig, egyptianSton
     currentBirdMoveKind: null,
     panicZones: {},
     pendingEchoes: [],
-    greekRemoval: null,
+    egyptianRemoval: null,
     lastPlacedThisTurn: [],
     lastPlacement: null,
     recentBirdEvents: [],
@@ -521,6 +534,7 @@ function setModeUI(modeKeys) {
   ui.modeSummary.textContent = mode.summary;
   ui.overlayTitle.textContent = mode.name;
   ui.overlayHint.textContent = mode.hint;
+  refreshEgyptianCapControls(modeKeys);
 }
 
 function setOptionsMenuCollapsed(collapsed) {
@@ -1194,7 +1208,7 @@ function recordRecentCapRemovalEvent(state, event) {
     return;
   }
   ensureRecentCapRemovalEventsState(state);
-  const mode = event.mode === "greek" ? "greek" : "egyptian";
+  const mode = "egyptian";
   const owner = event.owner === 2 ? 2 : 1;
   state.recentCapRemovalEvents.push({
     completedTurn: state.turnCount + 1,
@@ -1219,14 +1233,21 @@ function getLastTurnCapRemovalEvents(state) {
   if (!state.turnCount) {
     return [];
   }
-  return state.recentCapRemovalEvents.filter((event) => (
-    event.completedTurn === state.turnCount
-      && (event.mode === "egyptian" || event.mode === "greek")
-      && (event.owner === 1 || event.owner === 2)
-      && event.hex
-      && Number.isFinite(event.hex.q)
-      && Number.isFinite(event.hex.r)
-  ));
+  return state.recentCapRemovalEvents
+    .filter((event) => (
+      event.completedTurn === state.turnCount
+        && (event.mode === "egyptian" || event.mode === "greek")
+        && (event.owner === 1 || event.owner === 2)
+        && event.hex
+        && Number.isFinite(event.hex.q)
+        && Number.isFinite(event.hex.r)
+    ))
+    .map((event) => ({
+      completedTurn: event.completedTurn,
+      mode: "egyptian",
+      owner: event.owner,
+      hex: { q: event.hex.q, r: event.hex.r }
+    }));
 }
 
 function getCellAt(state, hex) {
@@ -1340,7 +1361,7 @@ function isLegalByBaseRules(state, hex, options = {}) {
 }
 
 function isLegalPlacement(state, hex) {
-  if (hasGreekRemovalPhase(state)) {
+  if (hasEgyptianRemovalPhase(state)) {
     return false;
   }
   if (!isLegalByBaseRules(state, hex, { allowOccupied: false })) {
@@ -1358,20 +1379,23 @@ function getEgyptianStoneCap(state) {
   return normaliseEgyptianStoneCap(state?.egyptianStoneCap);
 }
 
-function ensureGreekRemovalState(state) {
-  const pending = state?.greekRemoval;
+function ensureEgyptianRemovalState(state) {
+  const pending = state?.egyptianRemoval ?? state?.greekRemoval;
   if (!pending || typeof pending !== "object") {
-    state.greekRemoval = null;
+    state.egyptianRemoval = null;
     return;
   }
   const owner = pending.owner === 2 ? 2 : 1;
   const remaining = Math.max(0, Math.round(Number(pending.remaining) || 0));
-  state.greekRemoval = remaining > 0 ? { owner, remaining } : null;
+  state.egyptianRemoval = remaining > 0 ? { owner, remaining } : null;
+  if (Object.prototype.hasOwnProperty.call(state, "greekRemoval")) {
+    delete state.greekRemoval;
+  }
 }
 
-function hasGreekRemovalPhase(state) {
-  ensureGreekRemovalState(state);
-  return Boolean(state.greekRemoval && state.greekRemoval.remaining > 0);
+function hasEgyptianRemovalPhase(state) {
+  ensureEgyptianRemovalState(state);
+  return Boolean(state.egyptianRemoval && state.egyptianRemoval.remaining > 0);
 }
 
 function getStoneOverflowCount(state, owner) {
@@ -1404,60 +1428,46 @@ function getOwnerStoneEntriesSortedByAge(state, owner) {
     .map((entry) => ({ hex: parseKey(entry.key), cell: entry.cell }));
 }
 
-function enforceEgyptianStoneCap(state, owner) {
+function enforceStoneCapAfterPlacement(state, owner, options = {}) {
+  const interactiveEgyptian = Boolean(options.interactiveEgyptian);
   if (!hasMode(state, "egyptian")) {
-    return [];
+    return { removed: [], needsChoice: false };
   }
 
   const overflow = getStoneOverflowCount(state, owner);
-  return overflow > 0 ? removeOldestOwnerStones(state, owner, overflow, "egyptian") : [];
+  if (overflow <= 0) {
+    return { removed: [], needsChoice: false };
+  }
+
+  if (interactiveEgyptian) {
+    state.egyptianRemoval = { owner, remaining: overflow };
+    return { removed: [], needsChoice: true };
+  }
+
+  return { removed: removeOldestOwnerStones(state, owner, overflow, "egyptian"), needsChoice: false };
 }
 
-function enforceStoneCapAfterPlacement(state, owner, options = {}) {
-  const interactiveGreek = Boolean(options.interactiveGreek);
-
-  if (hasMode(state, "greek")) {
-    const overflow = getStoneOverflowCount(state, owner);
-    if (overflow <= 0) {
-      return { removed: [], needsChoice: false };
-    }
-
-    if (interactiveGreek) {
-      state.greekRemoval = { owner, remaining: overflow };
-      return { removed: [], needsChoice: true };
-    }
-
-    return { removed: removeOldestOwnerStones(state, owner, overflow, "greek"), needsChoice: false };
-  }
-
-  if (hasMode(state, "egyptian")) {
-    return { removed: enforceEgyptianStoneCap(state, owner), needsChoice: false };
-  }
-
-  return { removed: [], needsChoice: false };
-}
-
-function getEgyptianNextTwoRemovalHexes(state, owner = state.turnPlayer) {
-  if (!hasMode(state, "egyptian") || hasMode(state, "greek")) {
-    return [];
-  }
-
-  const cap = getEgyptianStoneCap(state);
-  const owned = getOwnerStoneEntriesSortedByAge(state, owner);
-  if (owned.length < cap) {
-    return [];
-  }
-
-  return owned.slice(0, 2).map((entry) => ({ ...entry.hex }));
-}
-
-function canSelectGreekRemovalHex(state, hex) {
-  if (!hasGreekRemovalPhase(state)) {
+function isLastPlacedStoneForOwner(state, owner, hex) {
+  if (!state.lastPlacement || !equalHex(state.lastPlacement, hex)) {
     return false;
   }
-  const owner = state.greekRemoval.owner;
   const cell = getCellAt(state, hex);
   return Boolean(cell && cell.kind === "stone" && cell.owner === owner);
+}
+
+function canSelectEgyptianRemovalHex(state, hex) {
+  if (!hasEgyptianRemovalPhase(state)) {
+    return false;
+  }
+  const owner = state.egyptianRemoval.owner;
+  const cell = getCellAt(state, hex);
+  if (!cell || cell.kind !== "stone" || cell.owner !== owner) {
+    return false;
+  }
+  if (isLastPlacedStoneForOwner(state, owner, hex)) {
+    return false;
+  }
+  return true;
 }
 
 function placeStone(state, hex, owner, kind = "stone") {
@@ -1607,12 +1617,11 @@ function resolveEchoes(state) {
       continue;
     }
     placeStone(state, target, echo.owner, "stone");
-    const capResolution = enforceStoneCapAfterPlacement(state, echo.owner, { interactiveGreek: false });
+    const capResolution = enforceStoneCapAfterPlacement(state, echo.owner, { interactiveEgyptian: false });
     pushLog(`Echo placed Player ${echo.owner} at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`);
     if (capResolution.removed.length > 0) {
       const removedList = capResolution.removed.map((pos) => `(${pos.q}, ${pos.r})`).join(", ");
-      const modeLabel = hasMode(state, "greek") ? "Greek" : "Egyptian";
-      pushLog(`${modeLabel} removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} for Player ${echo.owner}: ${removedList}.`);
+      pushLog(`Egyptian removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} for Player ${echo.owner}: ${removedList}.`);
     }
   }
   state.pendingEchoes = remain;
@@ -1742,7 +1751,7 @@ function endTurn(state) {
   state.duckPhase = false;
   state.birdMovesPending = [];
   state.currentBirdMoveKind = null;
-  state.greekRemoval = null;
+  state.egyptianRemoval = null;
   state.lastPlacedThisTurn = [];
   syncClockTickerFromState();
 }
@@ -1777,7 +1786,7 @@ function placeTurnTile(state, hex, owner) {
 
   placeStone(state, hex, owner, "stone");
   const capResolution = enforceStoneCapAfterPlacement(state, owner, {
-    interactiveGreek: hasMode(state, "greek") && owner === state.turnPlayer
+    interactiveEgyptian: hasMode(state, "egyptian") && owner === state.turnPlayer
   });
 
   queueEcho(state, {
@@ -1788,23 +1797,22 @@ function placeTurnTile(state, hex, owner) {
 
   if (capResolution.needsChoice) {
     return {
-      log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}). Greek: choose ${state.greekRemoval?.remaining || 1} stone${(state.greekRemoval?.remaining || 1) === 1 ? "" : "s"} to remove.`,
-      needsGreekChoice: true
+      log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}). Egyptian: choose ${state.egyptianRemoval?.remaining || 1} stone${(state.egyptianRemoval?.remaining || 1) === 1 ? "" : "s"} to remove (not the stone you just placed).`,
+      needsEgyptianChoice: true
     };
   }
 
   if (capResolution.removed.length === 0) {
     return {
       log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}).`,
-      needsGreekChoice: false
+      needsEgyptianChoice: false
     };
   }
 
   const removedList = capResolution.removed.map((pos) => `(${pos.q}, ${pos.r})`).join(", ");
-  const modeLabel = hasMode(state, "greek") ? "Greek" : "Egyptian";
   return {
-    log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}); ${modeLabel} removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} ${removedList}.`,
-    needsGreekChoice: false
+    log: `Player ${owner} placed at (${state.lastPlacement.q}, ${state.lastPlacement.r}); Egyptian removed oldest stone${capResolution.removed.length === 1 ? "" : "s"} ${removedList}.`,
+    needsEgyptianChoice: false
   };
 }
 
@@ -1819,23 +1827,23 @@ function clickPlacement(hex) {
     return;
   }
 
-  if (hasGreekRemovalPhase(state)) {
-    if (!canSelectGreekRemovalHex(state, hex)) {
+  if (hasEgyptianRemovalPhase(state)) {
+    if (!canSelectEgyptianRemovalHex(state, hex)) {
       return;
     }
 
     saveHistory();
     recordRecentCapRemovalEvent(state, {
-      mode: "greek",
-      owner: state.greekRemoval.owner,
+      mode: "egyptian",
+      owner: state.egyptianRemoval.owner,
       hex
     });
     removeStone(state, hex);
-    state.greekRemoval.remaining -= 1;
-    if (state.greekRemoval.remaining <= 0) {
-      const owner = state.greekRemoval.owner;
-      state.greekRemoval = null;
-      pushLog(`Greek removal complete for Player ${owner}.`);
+    state.egyptianRemoval.remaining -= 1;
+    if (state.egyptianRemoval.remaining <= 0) {
+      const owner = state.egyptianRemoval.owner;
+      state.egyptianRemoval = null;
+      pushLog(`Egyptian removal complete for Player ${owner}.`);
 
       if (checkForWinner(state)) {
         updateStatus();
@@ -1847,7 +1855,7 @@ function clickPlacement(hex) {
 
       finishSubmove(state);
     } else {
-      pushLog(`Greek: remove ${state.greekRemoval.remaining} more stone${state.greekRemoval.remaining === 1 ? "" : "s"}.`);
+      pushLog(`Egyptian: remove ${state.egyptianRemoval.remaining} more stone${state.egyptianRemoval.remaining === 1 ? "" : "s"} (not the stone just placed).`);
     }
 
     updateStatus();
@@ -1900,7 +1908,7 @@ function clickPlacement(hex) {
   }
   pushLog(placementResult.log);
 
-  if (placementResult.needsGreekChoice) {
+  if (placementResult.needsEgyptianChoice) {
     updateStatus();
     syncClockTickerFromState();
     render();
@@ -1939,10 +1947,10 @@ function updateStatus() {
 
   if (!state.openingMoveDone) {
     ui.subturnText.textContent = "Opening move: 1 placement";
-  } else if (hasGreekRemovalPhase(state)) {
-    const owner = state.greekRemoval.owner;
-    const remaining = state.greekRemoval.remaining;
-    ui.subturnText.textContent = `Greek: Player ${owner} choose ${remaining} stone${remaining === 1 ? "" : "s"} to remove`;
+  } else if (hasEgyptianRemovalPhase(state)) {
+    const owner = state.egyptianRemoval.owner;
+    const remaining = state.egyptianRemoval.remaining;
+    ui.subturnText.textContent = `Egyptian: Player ${owner} choose ${remaining} stone${remaining === 1 ? "" : "s"} to remove (not the one just placed)`;
   } else if (state.duckPhase) {
     ui.subturnText.textContent = getBirdActionPrompt(state.currentBirdMoveKind);
   } else {
@@ -2042,7 +2050,7 @@ function drawGrid() {
     && canActForCurrentTurn()
     && !game.state.winner
     && !game.state.duckPhase
-    && !hasGreekRemovalPhase(game.state)
+    && !hasEgyptianRemovalPhase(game.state)
   );
   const gridStroke = drawStep > 1 ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.08)";
   const gridFill = drawStep > 1 ? "rgba(255, 255, 255, 0.018)" : "rgba(255, 255, 255, 0.025)";
@@ -2349,38 +2357,15 @@ function drawPieces() {
     }
   }
 
-  if (hasMode(game.state, "egyptian") && !game.state.winner) {
-    const owner = game.state.turnPlayer === 2 ? 2 : 1;
-    const upcoming = getEgyptianNextTwoRemovalHexes(game.state, owner);
-    const stroke = owner === 2 ? "rgba(255, 140, 140, 0.92)" : "rgba(109, 198, 255, 0.92)";
-    const textFill = owner === 2 ? "rgba(255, 180, 180, 0.95)" : "rgba(180, 225, 255, 0.95)";
-
-    upcoming.forEach((hex, idx) => {
-      const world = axialToPixel(hex, size);
-      const screen = worldToScreen(world.x, world.y);
-      if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
-        return;
-      }
-
-      ctx.save();
-      ctx.setLineDash(idx === 0 ? [] : [5, 4]);
-      drawHex(screen.x, screen.y, size * 1.02, "rgba(255,255,255,0.02)", stroke, idx === 0 ? 3 : 2.2);
-      ctx.restore();
-
-      ctx.fillStyle = textFill;
-      ctx.font = `${Math.max(9, size * 0.34)}px system-ui`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(idx + 1), screen.x, screen.y - size * 0.93);
-    });
-  }
-
-  if (hasGreekRemovalPhase(game.state) && !game.state.winner) {
-    const owner = game.state.greekRemoval.owner;
+  if (hasEgyptianRemovalPhase(game.state) && !game.state.winner) {
+    const owner = game.state.egyptianRemoval.owner;
     const ownerEntries = getOwnerStoneEntriesSortedByAge(game.state, owner);
     const stroke = owner === 2 ? "rgba(255, 140, 140, 0.92)" : "rgba(109, 198, 255, 0.92)";
 
     for (const entry of ownerEntries) {
+      if (!canSelectEgyptianRemovalHex(game.state, entry.hex)) {
+        continue;
+      }
       const world = axialToPixel(entry.hex, size);
       const screen = worldToScreen(world.x, world.y);
       if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
@@ -2403,11 +2388,8 @@ function drawPieces() {
     }
 
     const stroke = event.owner === 2 ? "rgba(255, 140, 140, 0.9)" : "rgba(109, 198, 255, 0.9)";
-    const accent = event.mode === "greek" ? "rgba(255, 236, 179, 0.96)" : "rgba(230, 245, 255, 0.95)";
+    const accent = "rgba(230, 245, 255, 0.95)";
     ctx.save();
-    if (event.mode === "greek") {
-      ctx.setLineDash([6, 4]);
-    }
     drawHex(
       screen.x,
       screen.y,
