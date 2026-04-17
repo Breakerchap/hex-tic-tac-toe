@@ -205,6 +205,10 @@ function getExpectedTurnPlayer(room) {
   return room.state.turnPlayer === 2 ? 2 : 1;
 }
 
+function getUpdateIntent(message) {
+  return typeof message?.intent === "string" ? message.intent : "";
+}
+
 function buildStatePayload(room, byClientId = null) {
   return {
     type: "stateUpdate",
@@ -405,8 +409,20 @@ function handleStateUpdate(ws, message) {
     return;
   }
 
+  const intent = getUpdateIntent(message);
+  if (intent === "newGame" && meta.playerSlot !== 1) {
+    rejectStateUpdate(
+      ws,
+      room,
+      "ADMIN_ONLY_RESET",
+      "Only player 1 can start a new online game."
+    );
+    return;
+  }
+
   const expectedTurnPlayer = getExpectedTurnPlayer(room);
-  if (meta.playerSlot !== expectedTurnPlayer) {
+  const bypassTurnCheck = intent === "newGame" && meta.playerSlot === 1;
+  if (!bypassTurnCheck && meta.playerSlot !== expectedTurnPlayer) {
     rejectStateUpdate(
       ws,
       room,

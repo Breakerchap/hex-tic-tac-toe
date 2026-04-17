@@ -139,7 +139,7 @@
     window.updateStatus();
     syncClockTickerFromState();
     render();
-    broadcastOnlineState();
+    broadcastOnlineState({ intent: "newGame" });
   };
 
   document.getElementById("turnOrderInput")?.addEventListener("change", updateTurnOrderSummary);

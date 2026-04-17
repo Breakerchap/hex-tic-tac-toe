@@ -6,28 +6,46 @@ const timer = require("../timer-helpers.js");
 test("normaliseTimerConfig clamps and normalises values", () => {
   const config = timer.normaliseTimerConfig({
     enabled: 1,
-    initialMinutes: 999,
+    initialSeconds: 999999,
     incrementSeconds: -4
   });
 
   assert.deepEqual(config, {
     enabled: true,
+    initialSeconds: 10800,
     initialMinutes: 180,
+    initialSecondsPart: 0,
     incrementSeconds: 0
+  });
+});
+
+test("normaliseTimerConfig supports legacy minute-only configs", () => {
+  const config = timer.normaliseTimerConfig({
+    enabled: true,
+    initialMinutes: 2.5,
+    incrementSeconds: 3
+  });
+
+  assert.deepEqual(config, {
+    enabled: true,
+    initialSeconds: 150,
+    initialMinutes: 2,
+    initialSecondsPart: 30,
+    incrementSeconds: 3
   });
 });
 
 test("createClockState builds symmetric clocks", () => {
   const state = timer.createClockState({
     enabled: true,
-    initialMinutes: 3,
+    initialSeconds: 190,
     incrementSeconds: 2
   });
 
   assert.equal(state.enabled, true);
-  assert.equal(state.initialSeconds, 180);
-  assert.equal(state.remaining[1], 180);
-  assert.equal(state.remaining[2], 180);
+  assert.equal(state.initialSeconds, 190);
+  assert.equal(state.remaining[1], 190);
+  assert.equal(state.remaining[2], 190);
   assert.equal(state.activePlayer, 1);
   assert.equal(state.incrementSeconds, 2);
 });

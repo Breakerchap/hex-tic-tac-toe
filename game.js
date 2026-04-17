@@ -26,6 +26,7 @@ const ui = {
   coordText: document.getElementById("coordText"),
   zoomText: document.getElementById("zoomText"),
   timerMinutesInput: document.getElementById("timerMinutesInput"),
+  timerSecondsInput: document.getElementById("timerSecondsInput"),
   timerIncrementInput: document.getElementById("timerIncrementInput"),
   timerEnabledInput: document.getElementById("timerEnabledInput"),
   applyTimerBtn: document.getElementById("applyTimerBtn"),
@@ -50,9 +51,11 @@ const GRID_TARGET_HEXES_PER_FRAME = 3600;
 const GRID_HINT_MIN_HEX_SIZE = 9;
 const GRID_LOW_DETAIL_HEX_SIZE = 9;
 const GRID_VERY_LOW_DETAIL_HEX_SIZE = 6;
+const MIN_TIMER_INITIAL_SECONDS = 1;
+const MAX_TIMER_INITIAL_SECONDS = 180 * 60;
 const DEFAULT_TIMER_CONFIG = {
   enabled: true,
-  initialMinutes: 5,
+  initialSeconds: 5 * 60,
   incrementSeconds: 2
 };
 const DEFAULT_EGYPTIAN_STONE_CAP = 12;
@@ -89,16 +92,30 @@ const getRecentSerials = perfHelpers.getNewestTwoSerials || function legacyRecen
 
 const normaliseTimerConfig = timerHelpers.normaliseTimerConfig || function localNormaliseTimerConfig(config) {
   const safe = config || {};
+  const parsedInitialSeconds = Number(safe.initialSeconds);
+  const hasInitialSeconds = Number.isFinite(parsedInitialSeconds);
+  const legacyMinutes = Number(safe.initialMinutes);
+  const baseInitialSeconds = hasInitialSeconds
+    ? parsedInitialSeconds
+    : (Number.isFinite(legacyMinutes) ? legacyMinutes * 60 : 5 * 60);
+  const parsedIncrementSeconds = Number(safe.incrementSeconds);
+  const baseIncrementSeconds = Number.isFinite(parsedIncrementSeconds) ? parsedIncrementSeconds : 2;
+  const initialSeconds = Math.max(
+    MIN_TIMER_INITIAL_SECONDS,
+    Math.min(MAX_TIMER_INITIAL_SECONDS, Math.round(baseInitialSeconds))
+  );
   return {
     enabled: Boolean(safe.enabled),
-    initialMinutes: Math.max(1, Math.min(180, Math.round(Number(safe.initialMinutes) || 5))),
-    incrementSeconds: Math.max(0, Math.min(120, Math.round(Number(safe.incrementSeconds) || 2)))
+    initialSeconds,
+    initialMinutes: Math.floor(initialSeconds / 60),
+    initialSecondsPart: initialSeconds % 60,
+    incrementSeconds: Math.max(0, Math.min(120, Math.round(baseIncrementSeconds)))
   };
 };
 
 const createClockState = timerHelpers.createClockState || function localCreateClockState(config) {
   const timer = normaliseTimerConfig(config);
-  const initialSeconds = timer.initialMinutes * 60;
+  const initialSeconds = timer.initialSeconds;
   return {
     enabled: timer.enabled,
     initialSeconds,
@@ -118,6 +135,14 @@ const formatClock = timerHelpers.formatClock || function localFormatClock(second
   const secs = total % 60;
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 };
+
+function formatTimerSummary(timerConfig) {
+  const timer = normaliseTimerConfig(timerConfig);
+  if (!timer.enabled) {
+    return "Disabled";
+  }
+  return `${formatClock(timer.initialSeconds)} +${timer.incrementSeconds}s`;
+}
 
 const applyElapsedToClock = timerHelpers.applyElapsed || function localApplyElapsedToClock(clock, elapsedSeconds) {
   if (!clock || !clock.enabled || clock.flaggedPlayer) {
@@ -564,20 +589,30 @@ function renderLog() {
 }
 
 function getTimerConfigFromInputs() {
+  const minutes = Number(ui.timerMinutesInput.value);
+  const seconds = Number(ui.timerSecondsInput?.value);
+  const hasMinutes = Number.isFinite(minutes);
+  const hasSeconds = Number.isFinite(seconds);
+  const initialSeconds = (hasMinutes || hasSeconds)
+    ? ((hasMinutes ? minutes : 0) * 60) + (hasSeconds ? seconds : 0)
+    : undefined;
   return normaliseTimerConfig({
     enabled: ui.timerEnabledInput.checked,
+    initialSeconds,
     initialMinutes: ui.timerMinutesInput.value,
     incrementSeconds: ui.timerIncrementInput.value
   });
 }
 
 function setTimerInputs(timerConfig) {
-  ui.timerEnabledInput.checked = Boolean(timerConfig.enabled);
-  ui.timerMinutesInput.value = String(timerConfig.initialMinutes);
-  ui.timerIncrementInput.value = String(timerConfig.incrementSeconds);
-  ui.timerSummaryText.textContent = timerConfig.enabled
-    ? `${timerConfig.initialMinutes}m +${timerConfig.incrementSeconds}s`
-    : "Disabled";
+  const timer = normaliseTimerConfig(timerConfig);
+  ui.timerEnabledInput.checked = Boolean(timer.enabled);
+  ui.timerMinutesInput.value = String(timer.initialMinutes);
+  if (ui.timerSecondsInput) {
+    ui.timerSecondsInput.value = String(timer.initialSecondsPart);
+  }
+  ui.timerIncrementInput.value = String(timer.incrementSeconds);
+  ui.timerSummaryText.textContent = formatTimerSummary(timer);
 }
 
 function normaliseEgyptianStoneCap(value) {
@@ -736,6 +771,9 @@ function updateOnlineControls() {
   ui.undoBtn.disabled = inRoom && !admin;
   ui.applyTimerBtn.disabled = inRoom && !admin;
   ui.timerMinutesInput.disabled = inRoom && !admin;
+  if (ui.timerSecondsInput) {
+    ui.timerSecondsInput.disabled = inRoom && !admin;
+  }
   ui.timerIncrementInput.disabled = inRoom && !admin;
   ui.timerEnabledInput.disabled = inRoom && !admin;
   if (ui.egyptianCapInput) {
@@ -942,7 +980,7 @@ function applyRemoteState(state, revision) {
   ensureClockState(game.state);
   game.timerConfig = normaliseTimerConfig({
     enabled: game.state.clock.enabled,
-    initialMinutes: Math.round(game.state.clock.initialSeconds / 60),
+    initialSeconds: game.state.clock.initialSeconds,
     incrementSeconds: game.state.clock.incrementSeconds
   });
   game.egyptianStoneCap = normaliseEgyptianStoneCap(game.state.egyptianStoneCap);
@@ -992,7 +1030,11 @@ function handleOnlineMessage(message) {
 
   if (message.type === "stateUpdate") {
     updateAssignmentFromMessage(message);
-    if (typeof message.revision === "number" && message.revision < online.lastRevision) {
+    if (
+      typeof message.revision === "number"
+      && message.revision < online.lastRevision
+      && message.byClientId
+    ) {
       return;
     }
     applyRemoteState(message.state, message.revision);
@@ -1002,6 +1044,8 @@ function handleOnlineMessage(message) {
   if (message.type === "error" && message.message) {
     if (message.code === "NOT_YOUR_TURN") {
       pushLog("Online: you can only move on your own turn.");
+    } else if (message.code === "ADMIN_ONLY_RESET") {
+      pushLog("Online: only Player 1 can start a new online game.");
     } else if (message.code === "STALE_STATE") {
       pushLog("Online: game state was stale, synced to latest room state.");
     } else {
@@ -1046,17 +1090,20 @@ function leaveOnlineRoom() {
   updateOnlineStatusUI();
 }
 
-function broadcastOnlineState() {
+function broadcastOnlineState(options = {}) {
   if (online.applyingRemoteState) {
     return;
   }
   if (!online.roomCode || !online.socket || online.socket.readyState !== WebSocket.OPEN) {
     return;
   }
+
+  const intent = typeof options.intent === "string" ? options.intent : "";
   sendOnlineMessage({
     type: "stateUpdate",
     baseRevision: online.lastRevision,
-    state: game.state
+    state: game.state,
+    ...(intent ? { intent } : {})
   });
   online.lastRevision += 1;
 }
@@ -2578,7 +2625,7 @@ function newGame(modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfi
   updateStatus();
   syncClockTickerFromState();
   render();
-  broadcastOnlineState();
+  broadcastOnlineState({ intent: "newGame" });
 }
 
 function fillModePicker() {
@@ -2802,9 +2849,7 @@ ui.toggleMenuBtn.addEventListener("click", () => {
 
 function refreshTimerSummaryFromInputs() {
   const timerConfig = getTimerConfigFromInputs();
-  ui.timerSummaryText.textContent = timerConfig.enabled
-    ? `${timerConfig.initialMinutes}m +${timerConfig.incrementSeconds}s`
-    : "Disabled";
+  ui.timerSummaryText.textContent = formatTimerSummary(timerConfig);
 }
 
 function refreshEgyptianCapSummaryFromInputs() {
@@ -2813,6 +2858,7 @@ function refreshEgyptianCapSummaryFromInputs() {
 }
 
 ui.timerMinutesInput.addEventListener("input", refreshTimerSummaryFromInputs);
+ui.timerSecondsInput?.addEventListener("input", refreshTimerSummaryFromInputs);
 ui.timerIncrementInput.addEventListener("input", refreshTimerSummaryFromInputs);
 ui.timerEnabledInput.addEventListener("change", refreshTimerSummaryFromInputs);
 ui.egyptianCapInput?.addEventListener("input", refreshEgyptianCapSummaryFromInputs);

@@ -40,10 +40,13 @@
       <section class="section">
         <div class="small" style="margin-bottom: 8px; color: var(--text);">Timer</div>
         <div class="grid2">
-          <input id="timerMinutesInput" type="number" min="1" max="180" step="1" value="5" aria-label="Initial minutes" />
-          <input id="timerIncrementInput" type="number" min="0" max="120" step="1" value="2" aria-label="Increment seconds" />
+          <input id="timerMinutesInput" type="number" min="0" max="180" step="1" value="5" aria-label="Initial minutes" />
+          <input id="timerSecondsInput" type="number" min="0" max="59" step="1" value="0" aria-label="Initial seconds" />
         </div>
-        <div class="small" style="margin-top: 8px;">Initial minutes | increment seconds per completed turn</div>
+        <div class="small" style="margin-top: 8px;">Initial clock (minutes | seconds)</div>
+        <div style="height: 8px"></div>
+        <input id="timerIncrementInput" style="width: 100%;" type="number" min="0" max="120" step="1" value="2" aria-label="Increment seconds" />
+        <div class="small" style="margin-top: 8px;">Increment seconds per completed turn</div>
         <div style="height: 8px"></div>
         <label class="small" style="display: flex; align-items: center; gap: 8px; color: var(--text);">
           <input id="timerEnabledInput" type="checkbox" checked />
@@ -62,7 +65,7 @@
         <div style="height: 10px"></div>
         <div class="controls">
           <button id="applyTimerBtn">Apply Timer</button>
-          <div class="small" id="timerSummaryText" style="align-self: center;">5m +2s</div>
+          <div class="small" id="timerSummaryText" style="align-self: center;">05:00 +2s</div>
         </div>
       </section>
 

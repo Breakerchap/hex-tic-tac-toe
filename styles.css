@@ -250,6 +250,7 @@ button.primary {
 }
 
 #timerMinutesInput,
+#timerSecondsInput,
 #timerIncrementInput,
 #turnOrderInput {
   background:
@@ -262,6 +263,7 @@ button.primary {
 }
 
 #timerMinutesInput,
+#timerSecondsInput,
 #timerIncrementInput {
   text-align: center;
   letter-spacing: 0.02em;
@@ -287,6 +289,7 @@ button.primary {
 }
 
 #timerMinutesInput:focus,
+#timerSecondsInput:focus,
 #timerIncrementInput:focus,
 #turnOrderInput:focus {
   border-color: rgba(109, 198, 255, 0.62);

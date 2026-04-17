@@ -5,26 +5,45 @@
   }
   root.HexTicTacToeTimer = api;
 }(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  const MIN_INITIAL_SECONDS = 1;
+  const MAX_INITIAL_SECONDS = 180 * 60;
+
   function toFiniteNumber(value, fallback) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
   }
 
+  function clampInteger(value, min, max) {
+    return Math.max(min, Math.min(max, Math.round(toFiniteNumber(value, min))));
+  }
+
+  function resolveInitialSeconds(config) {
+    const safe = config || {};
+    if (Number.isFinite(Number(safe.initialSeconds))) {
+      return clampInteger(safe.initialSeconds, MIN_INITIAL_SECONDS, MAX_INITIAL_SECONDS);
+    }
+
+    const legacyMinutes = toFiniteNumber(safe.initialMinutes, 5);
+    return clampInteger(legacyMinutes * 60, MIN_INITIAL_SECONDS, MAX_INITIAL_SECONDS);
+  }
+
   function normaliseTimerConfig(config) {
     const safe = config || {};
     const enabled = Boolean(safe.enabled);
-    const initialMinutes = Math.max(1, Math.min(180, Math.round(toFiniteNumber(safe.initialMinutes, 5))));
+    const initialSeconds = resolveInitialSeconds(safe);
     const incrementSeconds = Math.max(0, Math.min(120, Math.round(toFiniteNumber(safe.incrementSeconds, 2))));
     return {
       enabled,
-      initialMinutes,
+      initialSeconds,
+      initialMinutes: Math.floor(initialSeconds / 60),
+      initialSecondsPart: initialSeconds % 60,
       incrementSeconds
     };
   }
 
   function createClockState(config) {
     const timer = normaliseTimerConfig(config);
-    const initialSeconds = timer.initialMinutes * 60;
+    const initialSeconds = timer.initialSeconds;
     return {
       enabled: timer.enabled,
       initialSeconds,
