@@ -21,6 +21,10 @@
     updateStatus: originalUpdateStatus
   } = internals;
 
+  const DEFAULT_EGYPTIAN_STONE_CAP = 12;
+  const MIN_EGYPTIAN_STONE_CAP = 6;
+  const MAX_EGYPTIAN_STONE_CAP = 999;
+
   function normaliseTurnOrder(value) {
     if (value === "p1First" || value === "p2First" || value === "random") {
       return value;
@@ -55,11 +59,11 @@
   }
 
   function normaliseEgyptianCap(value) {
-    const parsed = Math.round(Number(value));
-    if (!Number.isFinite(parsed)) {
-      return 12;
+    const parsed = Math.trunc(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return DEFAULT_EGYPTIAN_STONE_CAP;
     }
-    return Math.max(1, Math.min(120, parsed));
+    return Math.max(MIN_EGYPTIAN_STONE_CAP, Math.min(MAX_EGYPTIAN_STONE_CAP, parsed));
   }
 
   function syncEgyptianCapFromInput() {

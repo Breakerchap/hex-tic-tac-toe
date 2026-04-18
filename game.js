@@ -25,6 +25,7 @@ const ui = {
   overlayHint: document.getElementById("overlayHint"),
   coordText: document.getElementById("coordText"),
   zoomText: document.getElementById("zoomText"),
+  meteorTimerBadge: document.getElementById("meteorTimerBadge"),
   timerMinutesInput: document.getElementById("timerMinutesInput"),
   timerSecondsInput: document.getElementById("timerSecondsInput"),
   timerIncrementInput: document.getElementById("timerIncrementInput"),
@@ -59,6 +60,8 @@ const DEFAULT_TIMER_CONFIG = {
   incrementSeconds: 2
 };
 const DEFAULT_EGYPTIAN_STONE_CAP = 12;
+const MIN_EGYPTIAN_STONE_CAP = 6;
+const MAX_EGYPTIAN_STONE_CAP = 999;
 const HEX_VERTEX_UNIT = Array.from({ length: 6 }, (_, i) => {
   const angle = Math.PI / 180 * (60 * i - 30);
   return {
@@ -544,6 +547,7 @@ function makeInitialState(modeKeys, timerConfig = game.timerConfig, egyptianSton
     lastPlacement: null,
     recentBirdEvents: [],
     recentCapRemovalEvents: [],
+    recentMeteorRemovalEvents: [],
     lastPlacedByPlayer: { 1: null, 2: null },
     moveSerial: 0,
     log: ["Game started."],
@@ -616,11 +620,11 @@ function setTimerInputs(timerConfig) {
 }
 
 function normaliseEgyptianStoneCap(value) {
-  const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) {
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_EGYPTIAN_STONE_CAP;
   }
-  return Math.max(1, Math.min(120, parsed));
+  return Math.max(MIN_EGYPTIAN_STONE_CAP, Math.min(MAX_EGYPTIAN_STONE_CAP, parsed));
 }
 
 function getEgyptianStoneCapFromInputs() {
@@ -1297,6 +1301,53 @@ function getLastTurnCapRemovalEvents(state) {
     }));
 }
 
+function ensureRecentMeteorRemovalEventsState(state) {
+  if (!Array.isArray(state.recentMeteorRemovalEvents)) {
+    state.recentMeteorRemovalEvents = [];
+  }
+}
+
+function recordRecentMeteorRemovalEvent(state, event) {
+  if (!event || !event.hex || !Number.isFinite(event.hex.q) || !Number.isFinite(event.hex.r)) {
+    return;
+  }
+  ensureRecentMeteorRemovalEventsState(state);
+  const type = event.type === "bird" ? "bird" : "stone";
+  state.recentMeteorRemovalEvents.push({
+    completedTurn: state.turnCount,
+    type,
+    owner: type === "stone" ? (event.owner === 2 ? 2 : 1) : null,
+    birdKind: type === "bird"
+      ? (event.birdKind === "kingDuck" ? "kingDuck" : "duck")
+      : null,
+    hex: { q: event.hex.q, r: event.hex.r }
+  });
+  if (state.recentMeteorRemovalEvents.length > 24) {
+    state.recentMeteorRemovalEvents = state.recentMeteorRemovalEvents.slice(-24);
+  }
+}
+
+function pruneRecentMeteorRemovalEvents(state) {
+  ensureRecentMeteorRemovalEventsState(state);
+  state.recentMeteorRemovalEvents = state.recentMeteorRemovalEvents.filter((event) => (
+    Number.isInteger(event.completedTurn) && event.completedTurn >= state.turnCount
+  ));
+}
+
+function getLastTurnMeteorRemovalEvents(state) {
+  ensureRecentMeteorRemovalEventsState(state);
+  if (!state.turnCount) {
+    return [];
+  }
+  return state.recentMeteorRemovalEvents.filter((event) => (
+    event.completedTurn === state.turnCount
+      && (event.type === "stone" || event.type === "bird")
+      && event.hex
+      && Number.isFinite(event.hex.q)
+      && Number.isFinite(event.hex.r)
+  ));
+}
+
 function getCellAt(state, hex) {
   return state.cells[keyOf(hex.q, hex.r)] || null;
 }
@@ -1747,9 +1798,19 @@ function resolveMeteorAccounting(state) {
 
   for (const entry of farthest) {
     if (entry.type === "bird") {
+      recordRecentMeteorRemovalEvent(state, {
+        type: "bird",
+        birdKind: entry.birdKind,
+        hex: entry.pos
+      });
       state.birds[entry.birdKind] = null;
       state.birdEchoCopies[entry.birdKind] = null;
     } else {
+      recordRecentMeteorRemovalEvent(state, {
+        type: "stone",
+        owner: entry.cell?.owner,
+        hex: entry.pos
+      });
       removeStone(state, entry.pos);
     }
   }
@@ -1781,6 +1842,7 @@ function endTurn(state) {
   state.round += 1;
   pruneRecentBirdEvents(state);
   pruneRecentCapRemovalEvents(state);
+  pruneRecentMeteorRemovalEvents(state);
 
   resolveEchoes(state);
   resolveOrbit(state);
@@ -2349,7 +2411,22 @@ function drawHoverEchoPreview() {
 
 function drawMeteorPreview() {
   if (!hasMode(game.state, "meteorAccounting")) {
+    if (ui.meteorTimerBadge) {
+      ui.meteorTimerBadge.hidden = true;
+      ui.meteorTimerBadge.textContent = "";
+    }
     return;
+  }
+
+  const { farthestDistance, farthest } = getMeteorTargets(game.state);
+  const remainder = game.state.turnCount % 3;
+  const turnsUntilMeteor = remainder === 0 ? 3 : 3 - remainder;
+  const meterText = farthestDistance >= 0
+    ? `Meteor in ${turnsUntilMeteor} turn${turnsUntilMeteor === 1 ? "" : "s"} | target distance ${farthestDistance}`
+    : `Meteor in ${turnsUntilMeteor} turn${turnsUntilMeteor === 1 ? "" : "s"}`;
+  if (ui.meteorTimerBadge) {
+    ui.meteorTimerBadge.hidden = false;
+    ui.meteorTimerBadge.textContent = meterText;
   }
 
   const size = currentHexSize();
@@ -2358,9 +2435,6 @@ function drawMeteorPreview() {
   }
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
-  const { farthestDistance, farthest } = getMeteorTargets(game.state);
-  const remainder = game.state.turnCount % 3;
-  const turnsUntilMeteor = remainder === 0 ? 3 : 3 - remainder;
 
   if (farthest.length > 0) {
     for (const entry of farthest) {
@@ -2383,15 +2457,6 @@ function drawMeteorPreview() {
       ctx.restore();
     }
   }
-
-  const meterText = farthestDistance >= 0
-    ? `Meteor in ${turnsUntilMeteor} turn${turnsUntilMeteor === 1 ? "" : "s"} | target distance ${farthestDistance}`
-    : `Meteor in ${turnsUntilMeteor} turn${turnsUntilMeteor === 1 ? "" : "s"}`;
-  ctx.fillStyle = "rgba(255, 196, 120, 0.88)";
-  ctx.font = `${Math.max(11, size * 0.32)}px system-ui`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText(meterText, w / 2, 12);
 }
 
 function drawOrbitPreview() {
@@ -2578,6 +2643,38 @@ function drawPieces() {
     ctx.lineTo(screen.x + size * 0.17, screen.y + size * 0.17);
     ctx.moveTo(screen.x + size * 0.17, screen.y - size * 0.17);
     ctx.lineTo(screen.x - size * 0.17, screen.y + size * 0.17);
+    ctx.stroke();
+  }
+
+  const recentMeteorRemovalEvents = getLastTurnMeteorRemovalEvents(game.state);
+  for (const event of recentMeteorRemovalEvents) {
+    const world = axialToPixel(event.hex, size);
+    const screen = worldToScreen(world.x, world.y);
+    if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+      continue;
+    }
+
+    const stroke = "rgba(255, 179, 92, 0.94)";
+    const accent = "rgba(255, 231, 189, 0.98)";
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    drawHex(
+      screen.x,
+      screen.y,
+      size * (event.type === "bird" ? 1.03 : 0.98),
+      "rgba(255, 179, 92, 0.06)",
+      stroke,
+      2.5
+    );
+    ctx.restore();
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(screen.x - size * 0.19, screen.y - size * 0.19);
+    ctx.lineTo(screen.x + size * 0.19, screen.y + size * 0.19);
+    ctx.moveTo(screen.x + size * 0.19, screen.y - size * 0.19);
+    ctx.lineTo(screen.x - size * 0.19, screen.y + size * 0.19);
     ctx.stroke();
   }
 
@@ -2978,8 +3075,11 @@ function refreshTimerSummaryFromInputs() {
 }
 
 function refreshEgyptianCapSummaryFromInputs() {
+  if (!ui.egyptianCapSummaryText) {
+    return;
+  }
   const cap = getEgyptianStoneCapFromInputs();
-  setEgyptianCapInput(cap);
+  ui.egyptianCapSummaryText.textContent = `Cap: ${cap} stones/player`;
 }
 
 ui.timerMinutesInput.addEventListener("input", refreshTimerSummaryFromInputs);

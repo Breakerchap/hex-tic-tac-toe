@@ -52,7 +52,7 @@ body::before {
     radial-gradient(circle at 16% 22%, rgba(109, 198, 255, 0.14), transparent 24%),
     radial-gradient(circle at 76% 18%, rgba(255, 140, 140, 0.12), transparent 22%),
     radial-gradient(circle at 58% 78%, rgba(118, 227, 168, 0.12), transparent 28%);
-  animation: bgFloatA 34s ease-in-out infinite alternate;
+  animation: bgFloatA 92s ease-in-out infinite alternate;
   opacity: 0.42;
 }
 
@@ -61,7 +61,7 @@ body::after {
     radial-gradient(circle at 24% 72%, rgba(255, 215, 94, 0.08), transparent 20%),
     radial-gradient(circle at 84% 72%, rgba(165, 107, 255, 0.10), transparent 26%),
     radial-gradient(circle at 50% 14%, rgba(255, 255, 255, 0.05), transparent 18%);
-  animation: bgFloatB 46s ease-in-out infinite alternate;
+  animation: bgFloatB 125s ease-in-out infinite alternate;
   opacity: 0.28;
 }
 
@@ -505,10 +505,33 @@ canvas {
   left: 16px;
   right: 16px;
   top: 16px;
+  z-index: 5;
   display: flex;
   justify-content: space-between;
   gap: 12px;
   pointer-events: none;
+}
+
+.meteorTimerBadge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  min-height: 30px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 179, 92, 0.62);
+  background: rgba(26, 17, 6, 0.86);
+  color: rgba(255, 223, 173, 0.96);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .badge {
@@ -683,6 +706,13 @@ canvas {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+  }
+
+  .meteorTimerBadge {
+    top: 10px;
+    max-width: calc(100% - 20px);
+    white-space: normal;
+    text-wrap: balance;
   }
 
   .menuToggleButton {
