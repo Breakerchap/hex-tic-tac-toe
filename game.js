@@ -1962,10 +1962,6 @@ function placeTurnTile(state, hex, owner) {
 function clickPlacement(hex) {
   const state = game.state;
   if (game.futureHistory.length > 0) {
-    const message = "Timeline view active: use Forward to return to the latest position before making a move.";
-    if (state.log[0] !== message) {
-      pushLog(message);
-    }
     updateStatus();
     return;
   }
