@@ -193,6 +193,11 @@ body::after {
   line-height: 1.45;
 }
 
+.sectionHeading {
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -210,6 +215,8 @@ body::after {
 .controls select,
 .grid2 input,
 .grid2 select,
+.timerInputGroup input,
+.firstPlayerSelectWrap select,
 .modeToggle,
 .secondaryButton {
   width: 100%;
@@ -224,7 +231,7 @@ body::after {
 }
 
 button:hover,
-input:hover,
+input:not([type="checkbox"]):hover,
 select:hover,
 .modeToggle:hover,
 .secondaryButton:hover {
@@ -239,53 +246,145 @@ button.primary {
   border-color: rgba(109, 198, 255, 0.28);
 }
 
-.turnOrderSummary {
+.timerPanel {
+  display: grid;
+  gap: 10px;
+}
+
+.timerField {
+  display: grid;
+  gap: 6px;
+}
+
+.timerFieldLabel {
+  color: var(--text);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.timerSplitInputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.timerInputGroup {
+  position: relative;
+}
+
+.timerInputGroup input {
+  text-align: center;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  padding-right: 56px;
+}
+
+.timerInputGroupWide input {
+  padding-right: 90px;
+}
+
+.timerUnit {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  line-height: 1;
+  color: rgba(236, 242, 255, 0.74);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.timerToggle {
   display: flex;
   align-items: center;
+  gap: 10px;
   min-height: 44px;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.timerToggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--p1);
+}
+
+.firstPlayerSelectWrap {
+  position: relative;
+}
+
+.firstPlayerSelectWrap::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(236, 242, 255, 0.8);
+  border-bottom: 2px solid rgba(236, 242, 255, 0.8);
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+.turnOrderSummary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.timerControls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.timerSummaryPill {
+  min-width: 118px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 #timerMinutesInput,
 #timerSecondsInput,
 #timerIncrementInput,
 #turnOrderInput {
-  background:
-    linear-gradient(180deg, rgba(109, 198, 255, 0.09), rgba(109, 198, 255, 0.02) 42%),
-    rgba(255, 255, 255, 0.05);
-  border-color: rgba(109, 198, 255, 0.24);
-  box-shadow: inset 0 0 0 1px rgba(109, 198, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: none;
   font-weight: 600;
   min-height: 44px;
 }
 
-#timerMinutesInput,
-#timerSecondsInput,
-#timerIncrementInput {
-  text-align: center;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
 #turnOrderInput {
   appearance: none;
-  background-image:
-    linear-gradient(180deg, rgba(109, 198, 255, 0.09), rgba(109, 198, 255, 0.02) 42%),
-    linear-gradient(45deg, transparent 50%, rgba(236, 242, 255, 0.72) 50%),
-    linear-gradient(135deg, rgba(236, 242, 255, 0.72) 50%, transparent 50%);
-  background-repeat: no-repeat;
-  background-size:
-    auto,
-    8px 8px,
-    8px 8px;
-  background-position:
-    center,
-    calc(100% - 16px) calc(50% - 2px),
-    calc(100% - 11px) calc(50% - 2px);
-  padding-right: 34px;
+  padding-right: 36px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+#turnOrderInput option {
+  background: #13213f;
+  color: var(--text);
 }
 
 #timerMinutesInput:focus,
@@ -553,6 +652,8 @@ canvas {
   .controls button,
   .controls input,
   .controls select,
+  .timerInputGroup input,
+  .firstPlayerSelectWrap select,
   .modeToggle,
   .secondaryButton {
     min-height: 44px;
@@ -561,8 +662,18 @@ canvas {
 
   .modePickerGrid,
   .controls,
-  .grid2 {
+  .grid2,
+  .timerSplitInputs,
+  .timerPanel {
     gap: 8px;
+  }
+
+  .timerControls {
+    grid-template-columns: 1fr;
+  }
+
+  .timerSummaryPill {
+    width: 100%;
   }
 
   .overlay {

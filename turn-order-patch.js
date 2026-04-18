@@ -22,10 +22,10 @@
   } = internals;
 
   function normaliseTurnOrder(value) {
-    if (value === "p2First" || value === "random") {
+    if (value === "p1First" || value === "p2First" || value === "random") {
       return value;
     }
-    return "p1First";
+    return "random";
   }
 
   function resolveStartingPlayer(turnOrder) {
@@ -46,11 +46,11 @@
     }
     const turnOrder = normaliseTurnOrder(input.value);
     if (turnOrder === "p2First") {
-      summary.textContent = "Player 2 starts";
+      summary.textContent = "First player: P2";
     } else if (turnOrder === "random") {
-      summary.textContent = "Random first player";
+      summary.textContent = "First player: Random";
     } else {
-      summary.textContent = "Player 1 starts";
+      summary.textContent = "First player: P1";
     }
   }
 
@@ -115,7 +115,7 @@
     window.updateClockUI();
   };
 
-  window.newGame = function (modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfig, turnOrder = (document.getElementById("turnOrderInput")?.value || game.turnOrder || "p1First")) {
+  window.newGame = function (modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfig, turnOrder = (document.getElementById("turnOrderInput")?.value || game.turnOrder || "random")) {
     game.timerConfig = normaliseTimerConfig(timerConfig);
     game.turnOrder = normaliseTurnOrder(turnOrder);
     syncEgyptianCapFromInput();
@@ -143,7 +143,7 @@
   };
 
   document.getElementById("turnOrderInput")?.addEventListener("change", updateTurnOrderSummary);
-  game.turnOrder = normaliseTurnOrder(game.turnOrder || "p1First");
+  game.turnOrder = normaliseTurnOrder(game.turnOrder || "random");
   const input = document.getElementById("turnOrderInput");
   if (input) {
     input.value = game.turnOrder;

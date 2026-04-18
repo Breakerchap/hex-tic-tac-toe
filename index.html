@@ -18,7 +18,7 @@
       </section>
 
       <section class="section">
-        <div class="small" style="margin-bottom: 8px; color: var(--text);">Modes</div>
+        <div class="small sectionHeading">Modes</div>
         <div id="modePicker" class="modePickerGrid"></div>
         <div id="egyptianCapControls" hidden>
           <div style="height: 8px"></div>
@@ -38,39 +38,52 @@
       </section>
 
       <section class="section">
-        <div class="small" style="margin-bottom: 8px; color: var(--text);">Timer</div>
-        <div class="grid2">
-          <input id="timerMinutesInput" type="number" min="0" max="180" step="1" value="5" aria-label="Initial minutes" />
-          <input id="timerSecondsInput" type="number" min="0" max="59" step="1" value="0" aria-label="Initial seconds" />
-        </div>
-        <div class="small" style="margin-top: 8px;">Initial clock (minutes | seconds)</div>
-        <div style="height: 8px"></div>
-        <input id="timerIncrementInput" style="width: 100%;" type="number" min="0" max="120" step="1" value="2" aria-label="Increment seconds" />
-        <div class="small" style="margin-top: 8px;">Increment seconds per completed turn</div>
-        <div style="height: 8px"></div>
-        <label class="small" style="display: flex; align-items: center; gap: 8px; color: var(--text);">
-          <input id="timerEnabledInput" type="checkbox" checked />
-          Enable game timer
-        </label>
-        <div style="height: 10px"></div>
-        <div class="grid2">
-          <select id="turnOrderInput" aria-label="Who goes first">
-            <option value="p1First">Player 1 first</option>
-            <option value="p2First">Player 2 first</option>
-            <option value="random">Random first</option>
-          </select>
-          <div class="small turnOrderSummary" id="turnOrderSummaryText">Player 1 starts</div>
-        </div>
-        <div class="small" style="margin-top: 8px;">Choose who starts, or randomise it for each new game.</div>
-        <div style="height: 10px"></div>
-        <div class="controls">
-          <button id="applyTimerBtn">Apply Timer</button>
-          <div class="small" id="timerSummaryText" style="align-self: center;">05:00 +2s</div>
+        <div class="small sectionHeading">Timer</div>
+        <div class="timerPanel">
+          <div class="timerField">
+            <div class="small timerFieldLabel">Initial Clock</div>
+            <div class="timerSplitInputs">
+              <div class="timerInputGroup">
+                <input id="timerMinutesInput" type="number" min="0" max="180" step="1" value="5" aria-label="Initial minutes" />
+                <span class="small timerUnit">min</span>
+              </div>
+              <div class="timerInputGroup">
+                <input id="timerSecondsInput" type="number" min="0" max="59" step="1" value="0" aria-label="Initial seconds" />
+                <span class="small timerUnit">sec</span>
+              </div>
+            </div>
+          </div>
+          <div class="timerField">
+            <label class="small timerFieldLabel" for="timerIncrementInput">Increment</label>
+            <div class="timerInputGroup timerInputGroupWide">
+              <input id="timerIncrementInput" type="number" min="0" max="120" step="1" value="2" aria-label="Increment seconds" />
+              <span class="small timerUnit">sec / turn</span>
+            </div>
+          </div>
+          <label class="small timerToggle">
+            <input id="timerEnabledInput" type="checkbox" checked />
+            Enable game timer
+          </label>
+          <div class="timerField">
+            <label class="small timerFieldLabel" for="turnOrderInput">First Player:</label>
+            <div class="firstPlayerSelectWrap">
+              <select id="turnOrderInput" aria-label="First player">
+                <option value="random" selected>Random</option>
+                <option value="p1First">P1</option>
+                <option value="p2First">P2</option>
+              </select>
+            </div>
+          </div>
+          <div class="small turnOrderSummary" id="turnOrderSummaryText">First player: Random</div>
+          <div class="controls timerControls">
+            <button id="applyTimerBtn">Apply Timer</button>
+            <div class="small timerSummaryPill" id="timerSummaryText">05:00 +2s</div>
+          </div>
         </div>
       </section>
 
       <section class="section">
-        <div class="small" style="margin-bottom: 8px; color: var(--text);">Online</div>
+        <div class="small sectionHeading">Online</div>
         <div class="controls">
           <button id="onlineCreateBtn" class="primary">Create Room</button>
           <button id="onlineJoinBtn">Join Room</button>
