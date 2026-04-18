@@ -2223,6 +2223,130 @@ function drawEchoTargets() {
   }
 }
 
+function canShowHoverEchoPreview(state) {
+  return (
+    hasMode(state, "echo")
+    && canActForCurrentTurn()
+    && !state.winner
+    && !hasEgyptianRemovalPhase(state)
+  );
+}
+
+function canBirdEchoCopyAppearAfterMove(state, birdKind, destinationHex) {
+  if (!hasMode(state, "echo")) {
+    return false;
+  }
+
+  const target = { q: -destinationHex.q, r: -destinationHex.r };
+  if (isStoneOccupied(state, target)) {
+    return false;
+  }
+
+  const currentBirdHex = getBirdHex(state, birdKind);
+  const birdAtTarget = getBirdAt(state, target);
+  if (birdAtTarget) {
+    if (birdAtTarget !== birdKind) {
+      return false;
+    }
+
+    // Moving this bird away from its current hex frees that hex before copy placement.
+    const vacatingTarget = Boolean(
+      currentBirdHex
+      && equalHex(currentBirdHex, target)
+      && !equalHex(destinationHex, target)
+    );
+    if (!vacatingTarget) {
+      return false;
+    }
+  }
+
+  const copyAtTarget = getBirdEchoCopyAt(state, target);
+  if (copyAtTarget && copyAtTarget !== birdKind) {
+    return false;
+  }
+
+  // If destination mirrors to itself (origin), the moved bird occupies the copy target.
+  if (equalHex(destinationHex, target)) {
+    return false;
+  }
+
+  return true;
+}
+
+function drawHoverEchoPreview() {
+  const state = game.state;
+  if (!canShowHoverEchoPreview(state)) {
+    return;
+  }
+
+  const size = currentHexSize();
+  if (size < 8) {
+    return;
+  }
+
+  let target = null;
+  let fill = "rgba(109, 198, 255, 0.10)";
+  let stroke = "rgba(109, 198, 255, 0.88)";
+  let previewText = "";
+
+  if (state.duckPhase) {
+    const birdAction = normaliseBirdAction(state.currentBirdMoveKind) || { type: BIRD_ACTION_MOVE, birdKind: "duck" };
+    const birdKind = birdAction.birdKind;
+    const currentBirdHex = getBirdHex(state, birdKind);
+    const canMoveToHover = (
+      (!currentBirdHex || !equalHex(currentBirdHex, game.hoverHex))
+      && isHexOpenForBird(state, game.hoverHex, birdKind)
+    );
+    if (!canMoveToHover) {
+      return;
+    }
+
+    if (!canBirdEchoCopyAppearAfterMove(state, birdKind, game.hoverHex)) {
+      return;
+    }
+
+    target = { q: -game.hoverHex.q, r: -game.hoverHex.r };
+    if (birdKind === "kingDuck") {
+      fill = "rgba(255, 179, 92, 0.12)";
+      stroke = "rgba(255, 179, 92, 0.9)";
+      previewText = "\u{1F986}\u{1F451}";
+    } else {
+      fill = "rgba(255, 215, 94, 0.12)";
+      stroke = "rgba(255, 215, 94, 0.9)";
+      previewText = "\u{1F986}";
+    }
+  } else {
+    if (!isLegalPlacement(state, game.hoverHex)) {
+      return;
+    }
+    target = { q: -game.hoverHex.q, r: -game.hoverHex.r };
+    const owner = state.turnPlayer === 2 ? 2 : 1;
+    fill = owner === 1 ? "rgba(109, 198, 255, 0.10)" : "rgba(255, 140, 140, 0.10)";
+    stroke = owner === 1 ? "rgba(109, 198, 255, 0.88)" : "rgba(255, 140, 140, 0.88)";
+  }
+
+  const world = axialToPixel(target, size);
+  const screen = worldToScreen(world.x, world.y);
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (screen.x < -size * 2 || screen.y < -size * 2 || screen.x > w + size * 2 || screen.y > h + size * 2) {
+    return;
+  }
+
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  drawHex(screen.x, screen.y, size * 0.68, fill, stroke, 2);
+  ctx.restore();
+
+  if (previewText) {
+    ctx.fillStyle = "rgba(45, 30, 0, 0.88)";
+    ctx.font = `${Math.max(10, size * 0.38)}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(previewText, screen.x, screen.y + 1);
+  }
+}
+
 function drawMeteorPreview() {
   if (!hasMode(game.state, "meteorAccounting")) {
     return;
@@ -2586,6 +2710,7 @@ function renderNow() {
   drawGrid();
   drawOriginIndicator();
   drawEchoTargets();
+  drawHoverEchoPreview();
   drawMeteorPreview();
   drawOrbitPreview();
   drawWinnerLineHint();
