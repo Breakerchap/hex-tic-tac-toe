@@ -7,7 +7,8 @@ const ui = {
   appRoot: document.getElementById("appRoot"),
   modePicker: document.getElementById("modePicker"),
   newGameBtn: document.getElementById("newGameBtn"),
-  undoBtn: document.getElementById("undoBtn"),
+  historyBackBtn: document.getElementById("historyBackBtn"),
+  historyForwardBtn: document.getElementById("historyForwardBtn"),
   centreBtn: document.getElementById("centreBtn"),
   turnBig: document.getElementById("turnBig"),
   subturnText: document.getElementById("subturnText"),
@@ -377,7 +378,8 @@ const game = {
     lastTickAt: 0
   },
   state: null,
-  history: []
+  history: [],
+  futureHistory: []
 };
 
 const online = {
@@ -767,12 +769,18 @@ function canActForCurrentTurn() {
 function updateOnlineControls() {
   const inRoom = Boolean(online.roomCode || online.desiredRoomCode);
   const admin = canUseAdminControls();
+  const canUseTimelineControls = !(inRoom && !admin);
   ui.onlineCreateBtn.disabled = inRoom;
   ui.onlineJoinBtn.disabled = inRoom;
   ui.onlineRoomInput.disabled = inRoom;
   ui.onlineLeaveBtn.disabled = !inRoom;
   ui.newGameBtn.disabled = inRoom && !admin;
-  ui.undoBtn.disabled = inRoom && !admin;
+  if (ui.historyBackBtn) {
+    ui.historyBackBtn.disabled = !canUseTimelineControls || game.history.length === 0;
+  }
+  if (ui.historyForwardBtn) {
+    ui.historyForwardBtn.disabled = !canUseTimelineControls || game.futureHistory.length === 0;
+  }
   ui.applyTimerBtn.disabled = inRoom && !admin;
   ui.timerMinutesInput.disabled = inRoom && !admin;
   if (ui.timerSecondsInput) {
@@ -981,6 +989,8 @@ function applyRemoteState(state, revision) {
   }
   online.applyingRemoteState = true;
   game.state = cloneState(state);
+  game.history = [];
+  game.futureHistory = [];
   ensureClockState(game.state);
   game.timerConfig = normaliseTimerConfig({
     enabled: game.state.clock.enabled,
@@ -1117,18 +1127,42 @@ function saveHistory() {
   if (game.history.length > 80) {
     game.history.shift();
   }
+  game.futureHistory = [];
 }
 
-function restoreFromHistory() {
-  if (game.history.length === 0) {
+function restoreHistorySnapshot(snapshot) {
+  if (!snapshot) {
     return;
   }
-  game.state = game.history.pop();
+  game.state = cloneState(snapshot);
   ensureClockState(game.state);
   updateStatus();
   syncClockTickerFromState();
   render();
-  broadcastOnlineState();
+}
+
+function navigateHistoryBack() {
+  if (game.history.length === 0) {
+    return;
+  }
+  game.futureHistory.push(cloneState(game.state));
+  if (game.futureHistory.length > 80) {
+    game.futureHistory.shift();
+  }
+  const previous = game.history.pop();
+  restoreHistorySnapshot(previous);
+}
+
+function navigateHistoryForward() {
+  if (game.futureHistory.length === 0) {
+    return;
+  }
+  game.history.push(cloneState(game.state));
+  if (game.history.length > 80) {
+    game.history.shift();
+  }
+  const next = game.futureHistory.pop();
+  restoreHistorySnapshot(next);
 }
 
 function replaceTrackedHex(state, fromHex, toHex) {
@@ -1927,6 +1961,14 @@ function placeTurnTile(state, hex, owner) {
 
 function clickPlacement(hex) {
   const state = game.state;
+  if (game.futureHistory.length > 0) {
+    const message = "Timeline view active: use Forward to return to the latest position before making a move.";
+    if (state.log[0] !== message) {
+      pushLog(message);
+    }
+    updateStatus();
+    return;
+  }
   if (!canActForCurrentTurn()) {
     return;
   }
@@ -2054,7 +2096,9 @@ function updateStatus() {
   ui.duckPhaseText.textContent = state.duckPhase ? "Yes" : "No";
   ui.winnerText.textContent = state.winner ? `Player ${state.winner}` : "None";
 
-  if (!state.openingMoveDone) {
+  if (game.futureHistory.length > 0) {
+    ui.subturnText.textContent = "Timeline view: browsing previous board states (Back/Forward).";
+  } else if (!state.openingMoveDone) {
     ui.subturnText.textContent = "Opening move: 1 placement";
   } else if (hasEgyptianRemovalPhase(state)) {
     const owner = state.egyptianRemoval.owner;
@@ -2843,6 +2887,7 @@ function newGame(modeKeys = getSelectedModeKeys(), timerConfig = game.timerConfi
   game.state = makeInitialState(modeKeys, game.timerConfig, game.egyptianStoneCap);
   ensureClockState(game.state);
   game.history = [];
+  game.futureHistory = [];
   centreBoard();
   updateStatus();
   syncClockTickerFromState();
@@ -3045,11 +3090,18 @@ ui.newGameBtn.addEventListener("click", () => {
   newGame(getSelectedModeKeys(), getTimerConfigFromInputs());
 });
 
-ui.undoBtn.addEventListener("click", () => {
+ui.historyBackBtn?.addEventListener("click", () => {
   if (!canUseAdminControls()) {
     return;
   }
-  restoreFromHistory();
+  navigateHistoryBack();
+});
+
+ui.historyForwardBtn?.addEventListener("click", () => {
+  if (!canUseAdminControls()) {
+    return;
+  }
+  navigateHistoryForward();
 });
 
 ui.centreBtn.addEventListener("click", () => {

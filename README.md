@@ -60,7 +60,7 @@ If your frontend and backend are on different hosts, set the client WebSocket en
 - Right click or middle mouse drag: pan
 - Mouse wheel: zoom
 - `New Game`: restart with selected modes
-- `Undo`: revert one action
+- `Back` / `Forward`: browse earlier/later board states
 - `Centre Board`: reset camera
 
 ## Modes

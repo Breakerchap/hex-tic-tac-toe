@@ -139,6 +139,7 @@
     ensureClockState(game.state);
     game.state.clock.activePlayer = startingPlayer;
     game.history = [];
+    game.futureHistory = [];
     centreBoard();
     window.updateStatus();
     syncClockTickerFromState();
